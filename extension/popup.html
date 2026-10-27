@@ -1,0 +1,54 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GestureShare</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="brand">
+        <div class="brand-icon">G</div>
+        <div>
+          <h1>GestureShare</h1>
+          <p class="subtitle">Move files naturally.</p>
+        </div>
+      </div>
+      <span class="version">BETA</span>
+    </header>
+
+    <section class="status-card">
+      <div class="status-dot"></div>
+      <div>
+        <h2>Gesture status</h2>
+        <p id="gesture-status" role="status">Camera is stopped.</p>
+      </div>
+    </section>
+
+    <section class="gesture-card">
+      <div class="camera-frame">
+        <video id="camera" autoplay playsinline muted></video>
+        <canvas id="hand-canvas" width="320" height="240"></canvas>
+        <div id="camera-placeholder">Camera preview will appear here</div>
+      </div>
+
+      <h2>Hand gesture detection</h2>
+      <p>Allow camera access, then pinch your thumb and index finger.</p>
+
+      <button id="camera-start" type="button">Start Camera</button>
+      <button id="camera-stop" type="button" disabled>Stop Camera</button>
+    </section>
+
+    <footer>
+      <span>Camera runs on this device</span>
+      <span>v0.1.0</span>
+    </footer>
+  </main>
+
+  <script src="popup.js"></script>
+  <script src="gestures.js"></script>
+</body>
+</html>
