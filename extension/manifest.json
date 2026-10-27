@@ -9,5 +9,17 @@
     "default_popup": "popup.html"
   },
   "permissions": ["storage"],
-  "icons": {}
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/vision_bundle.mjs",
+        "vendor/wasm/*",
+        "vendor/models/hand_landmarker.task"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

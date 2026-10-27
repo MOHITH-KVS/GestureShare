@@ -48,9 +48,9 @@ async function startCamera() {
     handLandmarker = await vision.HandLandmarker.createFromOptions(files, {
       baseOptions: {
         modelAssetPath: chrome.runtime.getURL(
-          "vendor/hand_landmarker.task"
+         "vendor/models/hand_landmarker.task"
         ),
-        delegate: "GPU"
+        delegate: "CPU"
       },
       runningMode: "VIDEO",
       numHands: 1
