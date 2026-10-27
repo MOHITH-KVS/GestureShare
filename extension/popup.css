@@ -1,4 +1,155 @@
 
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  margin: 0;
+  background: #0f172a;
+  color: #f8fafc;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.app {
+  padding: 20px;
+}
+
+.header,
+.brand,
+.status-card,
+footer {
+  display: flex;
+  align-items: center;
+}
+
+.header {
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.brand {
+  gap: 11px;
+}
+
+.brand-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #2563eb;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 17px;
+}
+
+.subtitle,
+.status-card p,
+.gesture-card p,
+footer {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.subtitle {
+  margin-top: 4px;
+}
+
+.version {
+  color: #93c5fd;
+  background: #1e3a5f;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.status-card,
+.gesture-card {
+  border: 1px solid #29364d;
+  background: #172033;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.status-card {
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.status-card h2,
+.gesture-card h2 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.gesture-card {
+  text-align: center;
+  padding: 22px 16px 16px;
+}
+
+.gesture-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+.gesture-card p {
+  line-height: 1.6;
+}
+
+button {
+  width: 100%;
+  margin-top: 18px;
+  padding: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: #3b82f6;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #2563eb;
+}
+
+button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+.message {
+  margin-top: 12px;
+  min-height: 18px;
+}
+
+footer {
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 18px;
+  font-size: 10px;
+}
+
+/* Camera preview */
+
 .camera-frame {
   position: relative;
   width: 100%;
