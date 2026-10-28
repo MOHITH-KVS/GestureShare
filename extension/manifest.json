@@ -1,25 +1,16 @@
-
 {
   "manifest_version": 3,
   "name": "GestureShare",
   "version": "0.1.0",
   "description": "Transfer files between devices using hand gestures.",
   "action": {
-    "default_title": "GestureShare",
-    "default_popup": "popup.html"
+    "default_title": "Open GestureShare"
+  },
+  "background": {
+    "service_worker": "background.js"
   },
   "permissions": ["storage"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "vendor/vision_bundle.mjs",
-        "vendor/wasm/*",
-        "vendor/models/hand_landmarker.task"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

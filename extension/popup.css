@@ -4,15 +4,15 @@
 }
 
 body {
-  width: 360px;
+  width: 380px;
   margin: 0;
-  background: #0f172a;
+  background: #0b1220;
   color: #f8fafc;
   font-family: "Segoe UI", Arial, sans-serif;
 }
 
 .app {
-  padding: 20px;
+  padding: 18px;
 }
 
 .header,
@@ -25,7 +25,7 @@ footer {
 
 .header {
   justify-content: space-between;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
 
 .brand {
@@ -45,6 +45,7 @@ footer {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -53,9 +54,13 @@ h1 {
   font-size: 17px;
 }
 
+h2 {
+  font-size: 14px;
+}
+
 .subtitle,
 .status-card p,
-.gesture-card p,
+.gesture-card > p,
 footer {
   color: #94a3b8;
   font-size: 12px;
@@ -77,14 +82,14 @@ footer {
 .status-card,
 .gesture-card {
   border: 1px solid #29364d;
-  background: #172033;
+  background: #141f32;
   border-radius: 14px;
-  padding: 16px;
+  padding: 15px;
 }
 
 .status-card {
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 11px;
+  margin-bottom: 14px;
 }
 
 .status-dot {
@@ -95,69 +100,31 @@ footer {
   background: #f59e0b;
 }
 
-.status-card h2,
-.gesture-card h2 {
-  font-size: 14px;
-  margin-bottom: 6px;
+.status-dot.active {
+  background: #22c55e;
+}
+
+.status-dot.error {
+  background: #ef4444;
+}
+
+.status-card p {
+  margin-top: 5px;
+  line-height: 1.5;
 }
 
 .gesture-card {
   text-align: center;
-  padding: 22px 16px 16px;
 }
-
-.gesture-icon {
-  font-size: 36px;
-  margin-bottom: 12px;
-}
-
-.gesture-card p {
-  line-height: 1.6;
-}
-
-button {
-  width: 100%;
-  margin-top: 18px;
-  padding: 12px;
-  border: 0;
-  border-radius: 9px;
-  background: #3b82f6;
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:hover {
-  background: #2563eb;
-}
-
-button:focus-visible {
-  outline: 2px solid #93c5fd;
-  outline-offset: 3px;
-}
-
-.message {
-  margin-top: 12px;
-  min-height: 18px;
-}
-
-footer {
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 18px;
-  font-size: 10px;
-}
-
-/* Camera preview */
 
 .camera-frame {
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
-  margin: 16px 0;
+  margin-bottom: 17px;
   overflow: hidden;
   border: 1px solid #334155;
-  border-radius: 10px;
+  border-radius: 11px;
   background: #020617;
 }
 
@@ -184,19 +151,117 @@ footer {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 12px;
-  color: #94a3b8;
-  font-size: 12px;
-  text-align: center;
-  pointer-events: none;
+  padding: 16px;
+  background: rgba(2, 6, 23, 0.92);
+  color: #cbd5e1;
 }
 
-#camera-stop {
-  margin-top: 8px;
-  background: #334155;
+#camera-placeholder[hidden] {
+  display: none;
+}
+
+.placeholder-icon {
+  margin-bottom: 9px;
+  font-size: 32px;
+}
+
+#placeholder-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#placeholder-description {
+  margin-top: 7px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.gesture-card > h2 {
+  margin-bottom: 7px;
+}
+
+.gesture-card > p {
+  line-height: 1.6;
+}
+
+button {
+  width: 100%;
+  margin-top: 15px;
+  padding: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: #3b82f6;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
 }
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
+}
+
+.secondary-button {
+  margin-top: 9px;
+  background: #263449;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #334155;
+}
+
+.permission-help {
+  margin-top: 15px;
+  padding: 13px;
+  border: 1px solid #7f3434;
+  border-radius: 10px;
+  background: #291a24;
+  text-align: left;
+}
+
+.permission-help[hidden] {
+  display: none;
+}
+
+.permission-help h3 {
+  margin-bottom: 7px;
+  font-size: 13px;
+}
+
+.permission-help p {
+  color: #fecaca;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.privacy-note {
+  margin-top: 15px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.privacy-icon {
+  color: #22c55e;
+  margin-right: 5px;
+}
+
+footer {
+  justify-content: space-between;
+  margin-top: 16px;
+  font-size: 10px;
+}
+
+[hidden] {
+  display: none !important;
 }

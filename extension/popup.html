@@ -21,10 +21,12 @@
     </header>
 
     <section class="status-card">
-      <div class="status-dot"></div>
+      <div id="status-dot" class="status-dot"></div>
       <div>
-        <h2>Gesture status</h2>
-        <p id="gesture-status" role="status">Camera is stopped.</p>
+        <h2 id="status-title">Camera is off</h2>
+        <p id="gesture-status" role="status" aria-live="polite">
+          Enable your camera to start hand detection.
+        </p>
       </div>
     </section>
 
@@ -32,18 +34,44 @@
       <div class="camera-frame">
         <video id="camera" autoplay playsinline muted></video>
         <canvas id="hand-canvas" width="320" height="240"></canvas>
-        <div id="camera-placeholder">Camera preview will appear here</div>
+        <div id="camera-placeholder">
+          <div>
+            <div class="placeholder-icon">✋</div>
+            <p id="placeholder-title">Your camera is off</p>
+            <p id="placeholder-description">
+              Enable camera access to recognize hand gestures.
+            </p>
+          </div>
+        </div>
       </div>
 
       <h2>Hand gesture detection</h2>
-      <p>Allow camera access, then pinch your thumb and index finger.</p>
+      <p>Pinch your thumb and index finger to test gesture recognition.</p>
 
-      <button id="camera-start" type="button">Start Camera</button>
+      <button id="camera-start" type="button">Enable Camera</button>
       <button id="camera-stop" type="button" disabled>Stop Camera</button>
+
+      <div id="permission-help" class="permission-help" hidden>
+        <h3>Camera access is needed</h3>
+        <p id="permission-message">
+          Allow camera access in Chrome to use hand gestures.
+        </p>
+        <button id="help-button" class="secondary-button" type="button">
+          How to enable camera
+        </button>
+        <button id="retry-button" class="secondary-button" type="button">
+          Try again
+        </button>
+      </div>
+
+      <p class="privacy-note">
+        <span class="privacy-icon">●</span>
+        Camera processing stays on this device.
+      </p>
     </section>
 
     <footer>
-      <span>Camera runs on this device</span>
+      <span>GestureShare</span>
       <span>v0.1.0</span>
     </footer>
   </main>
