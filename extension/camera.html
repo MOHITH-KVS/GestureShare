@@ -1,322 +1,106 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GestureShare — Camera</title>
-  <link rel="stylesheet" href="popup.css">
-
-  <style>
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
-    body {
-      width: 100%;
-      min-width: 0;
-      min-height: 100%;
-      margin: 0;
-    }
-
-    body {
-      min-height: 100vh;
-      background: #0b1220;
-      color: #f8fafc;
-      font-family: "Segoe UI", Arial, sans-serif;
-    }
-
-    .app {
-      width: 100%;
-      max-width: 1440px;
-      min-width: 0;
-      margin: 0 auto;
-      padding: clamp(12px, 2.5vw, 28px);
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      min-width: 0;
-    }
-
-    .status-card {
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      margin-bottom: 16px;
-    }
-
-    .status-card > div:last-child {
-      min-width: 0;
-    }
-
-    .gesture-card {
-      width: 100%;
-      min-width: 0;
-      padding: clamp(12px, 2vw, 24px);
-      text-align: center;
-    }
-
-    .camera-frame {
-      position: relative;
-      width: 100%;
-      max-width: 720px;
-      /* JS sets --video-aspect (e.g. "640 / 480") from the real camera size, so the video and the
-         hand overlay always cover exactly the same rectangle. */
-      aspect-ratio: var(--video-aspect, 4 / 3);
-      margin: 0 auto 16px;
-      overflow: hidden;
-      border: 1px solid #334155;
-      border-radius: 11px;
-      background: #020617;
-    }
-
-    #camera,
-    #hand-canvas {
-      position: absolute;
-      inset: 0;
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-
-    #camera {
-      object-fit: fill;
-      transform: scaleX(-1);
-    }
-
-    #hand-canvas {
-      pointer-events: none;
-      transform: scaleX(-1);
-    }
-
-    #camera-placeholder {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      padding: 16px;
-      background: rgba(2, 6, 23, 0.92);
-      color: #cbd5e1;
-    }
-
-    #camera-placeholder[hidden],
-    .permission-help[hidden] {
-      display: none !important;
-    }
-
-    .gesture-card > h2 {
-      margin: 0 0 8px;
-      font-size: 16px;
-    }
-
-    .gesture-card > p {
-      margin: 0;
-      line-height: 1.6;
-      overflow-wrap: anywhere;
-    }
-
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 14px;
-    }
-
-    .actions button {
-      flex: 1 1 180px;
-      min-width: 0;
-      margin-top: 0;
-    }
-
-    .permission-help {
-      margin-top: 14px;
-      padding: 13px;
-      border: 1px solid #7f3434;
-      border-radius: 10px;
-      background: #291a24;
-      text-align: left;
-    }
-
-    .permission-help h3 {
-      margin: 0 0 7px;
-    }
-
-    .permission-help p {
-      overflow-wrap: anywhere;
-      line-height: 1.5;
-    }
-
-    .permission-help button {
-      margin-top: 10px;
-    }
-
-    .privacy-note {
-      margin-top: 14px !important;
-    }
-
-    .debug-ratio {
-      min-height: 1.4em;
-      margin: 0 0 8px !important;
-      color: #64748b;
-      font: 12px ui-monospace, Consolas, monospace;
-    }
-
-    footer {
-      display: flex;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 14px;
-    }
-
-    button {
-      overflow-wrap: anywhere;
-    }
-
-    /* Narrow windows and mobile-sized layouts */
-    @media (max-width: 600px) {
-      .app {
-        padding: 12px;
-      }
-
-      .header {
-        margin-bottom: 12px;
-      }
-
-      .status-card {
-        margin-bottom: 12px;
-      }
-
-      .gesture-card {
-        padding: 10px;
-      }
-
-      .actions {
-        flex-direction: column;
-      }
-
-      .actions button {
-        flex: none;
-        width: 100%;
-      }
-    }
-
-    /* Short desktop windows */
-    @media (min-width: 601px) and (max-height: 650px) {
-      .app {
-        padding-top: 10px;
-        padding-bottom: 10px;
-      }
-
-      .header {
-        margin-bottom: 10px;
-      }
-
-      .status-card {
-        margin-bottom: 10px;
-      }
-
-      .camera-frame {
-        max-width: min(520px, 100%);
-        margin-bottom: 10px;
-      }
-
-      footer {
-        margin-top: 10px;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="camera.css">
 </head>
 
 <body>
-  <main class="app">
-    <header class="header">
+  <div class="app">
+    <header class="topbar">
       <div class="brand">
-        <div class="brand-icon">G</div>
+        <div class="brand-icon" aria-hidden="true">G</div>
         <div>
           <h1>GestureShare</h1>
           <p class="subtitle">Move files naturally.</p>
         </div>
       </div>
       <span class="version">BETA</span>
+      <button id="close-button" class="secondary-button" type="button">Close</button>
     </header>
 
-    <section class="status-card">
-      <div id="status-dot" class="status-dot"></div>
-      <div>
-        <h2 id="status-title">Camera is off</h2>
-        <p id="gesture-status" role="status" aria-live="polite">
-          Enable your camera to start hand detection.
-        </p>
-      </div>
-    </section>
+    <main class="layout">
+      <!-- Camera -->
+      <section class="stage" aria-label="Camera preview">
+        <div class="camera-frame" id="camera-frame">
+          <video id="camera" autoplay playsinline muted></video>
+          <canvas id="hand-canvas" width="640" height="480" aria-hidden="true"></canvas>
+          <span class="frame-badge" id="live-badge" hidden>Live</span>
 
-    <section class="gesture-card">
-      <div class="camera-frame">
-        <video id="camera" autoplay playsinline muted></video>
-        <canvas id="hand-canvas" width="320" height="240"></canvas>
-
-        <div id="camera-placeholder">
-          <div>
-            <div class="placeholder-icon">✋</div>
+          <div id="camera-placeholder" data-state="off">
+            <div class="placeholder-icon" aria-hidden="true">✋</div>
+            <div class="spinner" aria-hidden="true"></div>
             <p id="placeholder-title">Your camera is off</p>
-            <p id="placeholder-description">
-              Enable camera access to recognize hand gestures.
+            <p id="placeholder-description">Turn on the camera to recognize hand gestures.</p>
+            <button id="camera-start" type="button">Enable Camera</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Controls -->
+      <aside class="panel" aria-label="Gesture controls">
+        <div class="card status-card">
+          <div id="status-dot" class="status-dot" aria-hidden="true"></div>
+          <div>
+            <h2 id="status-title">Camera is off</h2>
+            <p id="gesture-status" role="status" aria-live="polite">
+              Enable your camera to start hand detection.
             </p>
           </div>
         </div>
-      </div>
 
-      <p id="debug-ratio" class="debug-ratio" aria-hidden="true"></p>
+        <div class="card">
+          <div class="indicators" aria-hidden="true">
+            <span class="chip" id="chip-hand">Hand</span>
+            <span class="chip" id="chip-pinch">Pinch</span>
+          </div>
 
-      <h2>Hand gesture detection</h2>
-      <p>Pinch your thumb and index finger to test gesture recognition.</p>
+          <div class="meter-head" style="margin-top:14px" aria-hidden="true">
+            <span>Pinch strength</span>
+            <b id="meter-value">–</b>
+          </div>
+          <div class="meter" id="meter" aria-hidden="true">
+            <div class="meter-fill" id="meter-fill"></div>
+            <div class="meter-mark" id="meter-mark-on" title="Pinch starts here"></div>
+            <div class="meter-mark" id="meter-mark-off" title="Pinch ends here"></div>
+          </div>
+          <p id="debug-ratio" aria-hidden="true"></p>
+        </div>
 
-      <div class="actions">
-        <button id="camera-start" type="button">Enable Camera</button>
-        <button id="camera-stop" type="button" disabled>Stop Camera</button>
-        <button id="close-button" class="secondary-button" type="button">
-          Close GestureShare
-        </button>
-      </div>
+        <div class="actions">
+          <button id="camera-stop" class="secondary-button" type="button" disabled>Stop Camera</button>
+        </div>
 
-      <div id="permission-help" class="permission-help" hidden>
-        <h3>Camera access is needed</h3>
-        <p id="permission-message">
-          Allow camera access in Chrome to use hand gestures.
+        <div id="permission-help" class="permission-help" role="alert" hidden>
+          <h3>Camera access is needed</h3>
+          <p id="permission-message">Allow camera access in Chrome to use hand gestures.</p>
+          <div class="actions">
+            <button id="help-button" class="secondary-button" type="button">How to enable camera</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <ol class="tips">
+            <li>Hold <b>one hand</b> in front of the camera, palm facing it.</li>
+            <li><b>Pinch</b> your thumb and index finger to test recognition.</li>
+            <li>Watch the <b>Pinch</b> light and the strength bar react.</li>
+          </ol>
+        </div>
+
+        <p class="privacy-note">
+          <span class="privacy-icon" aria-hidden="true">●</span>
+          <span>Camera processing stays on this device. Nothing is recorded or uploaded.</span>
         </p>
-        <button id="help-button" class="secondary-button" type="button">
-          How to enable camera
-        </button>
-        <button id="retry-button" class="secondary-button" type="button">
-          Try again
-        </button>
-      </div>
-
-      <p class="privacy-note">
-        <span class="privacy-icon">●</span>
-        Camera processing stays on this device.
-      </p>
-    </section>
+      </aside>
+    </main>
 
     <footer>
       <span>GestureShare</span>
       <span>v0.1.0</span>
     </footer>
-  </main>
+  </div>
 
   <script src="gestures.js"></script>
 </body>

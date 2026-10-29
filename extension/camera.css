@@ -1,0 +1,239 @@
+/* GestureShare — camera page.
+   Layout: camera on the left and controls on the right on wide screens; one column on narrow
+   screens. The camera is sized so it never pushes the controls off the bottom of the window. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --panel: #111a2e;
+  --panel-2: #16223a;
+  --line: #26344f;
+  --text: #f1f5f9;
+  --muted: #9fb0c8;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --bad: #ef4444;
+  --cyan: #22d3ee;
+  --radius: 14px;
+  /* Space above/below the camera that is not the camera (header, padding, hint text). */
+  --chrome-h: 150px;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; min-height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+h1, h2, h3, p, ol { margin: 0; }
+[hidden] { display: none !important; }
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100dvh;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px clamp(12px, 3vw, 32px) 20px;
+}
+
+/* ---------- Header ---------- */
+.topbar { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; margin-right: auto; }
+.brand-icon {
+  display: grid; place-items: center; flex: none;
+  width: 44px; height: 44px; border-radius: 12px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  font-size: 22px; font-weight: 700;
+}
+.brand h1 { font-size: 1.1rem; line-height: 1.2; }
+.subtitle { color: var(--muted); font-size: .85rem; }
+.version {
+  flex: none; padding: 4px 9px; border-radius: 6px;
+  background: #1e3a5f; color: #93c5fd; font-size: .7rem; font-weight: 700; letter-spacing: .04em;
+}
+
+/* ---------- Layout ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+}
+
+/* ---------- Camera ---------- */
+.stage { min-width: 0; }
+
+.camera-frame {
+  position: relative;
+  margin: 0 auto;
+  /* JS sets --video-aspect ("640 / 480") and --video-ratio (1.333) from the real camera.
+     Width is limited by the column AND by the window height, so the whole camera is always visible. */
+  width: min(100%, calc((100dvh - var(--chrome-h)) * var(--video-ratio, 1.3333)));
+  min-width: 220px;
+  aspect-ratio: var(--video-aspect, 4 / 3);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #020617;
+}
+@media (max-width: 860px) {
+  .camera-frame { width: 100%; --chrome-h: 0px; }
+}
+
+#camera, #hand-canvas {
+  position: absolute; inset: 0;
+  display: block; width: 100%; height: 100%;
+  transform: scaleX(-1);              /* mirror, like a selfie camera */
+}
+#camera { object-fit: fill; background: #020617; }   /* frame has the camera's own shape, so no bars */
+#hand-canvas { pointer-events: none; }
+
+.frame-badge {
+  position: absolute; top: 10px; left: 10px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(2, 6, 23, .72); color: #fff; font-size: .75rem; font-weight: 600;
+  backdrop-filter: blur(6px);
+}
+.frame-badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+
+/* Overlay shown while the camera is off, loading, or failed */
+#camera-placeholder {
+  position: absolute; inset: 0; z-index: 3;
+  display: grid; place-items: center; align-content: center; gap: 6px;
+  padding: 16px; text-align: center;
+  background: radial-gradient(circle at 50% 35%, #0f1b33, #020617 70%);
+  color: #cbd5e1;
+}
+.placeholder-icon { font-size: clamp(30px, 6vw, 48px); line-height: 1; }
+#placeholder-title { font-size: clamp(.95rem, 2.2vw, 1.15rem); font-weight: 600; color: #fff; }
+#placeholder-description { max-width: 34ch; color: var(--muted); font-size: .9rem; }
+#placeholder-action { margin-top: 10px; }
+.spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid #1e293b; border-top-color: var(--cyan);
+  animation: spin .9s linear infinite;
+}
+#camera-placeholder[data-state="off"] .spinner,
+#camera-placeholder[data-state="error"] .spinner { display: none; }
+#camera-placeholder[data-state="loading"] .placeholder-icon,
+#camera-placeholder[data-state="loading"] #placeholder-action { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Side panel ---------- */
+.panel { display: grid; gap: 12px; min-width: 0; }
+
+.card {
+  padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.status-card { display: flex; align-items: flex-start; gap: 12px; }
+.status-dot {
+  flex: none; width: 12px; height: 12px; margin-top: 6px; border-radius: 50%;
+  background: var(--warn);
+}
+.status-dot.active { background: var(--ok); animation: pulse 2s ease-out infinite; }
+.status-dot.error { background: var(--bad); }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, .55); }
+  70%, 100% { box-shadow: 0 0 0 9px rgba(34, 197, 94, 0); }
+}
+#status-title { font-size: 1.05rem; line-height: 1.3; }
+#gesture-status { margin-top: 2px; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+
+/* live indicators */
+.indicators { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--muted); font-size: .85rem; font-weight: 600;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #475569; }
+.chip.on { color: #fff; border-color: #166534; background: #14532d; }
+.chip.on::before { background: var(--ok); }
+
+.meter-head { display: flex; justify-content: space-between; gap: 8px; font-size: .85rem; color: var(--muted); }
+.meter-head b { color: var(--text); font-weight: 600; }
+.meter {
+  position: relative; height: 12px; margin-top: 8px;
+  border-radius: 999px; background: #0b1426; border: 1px solid var(--line); overflow: hidden;
+}
+.meter-fill {
+  position: absolute; inset: 0; width: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--accent));
+  transform-origin: left center; transform: scaleX(0);
+  transition: transform .08s linear;
+}
+.meter.pinched .meter-fill { background: var(--ok); }
+.meter-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255, 255, 255, .7); }
+#debug-ratio { margin-top: 8px; min-height: 1.3em; color: #64748b; font: 12px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+
+/* buttons */
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+button {
+  min-height: 44px; padding: 10px 16px;
+  border: 1px solid transparent; border-radius: 10px;
+  background: var(--accent); color: #fff;
+  font: inherit; font-size: .95rem; font-weight: 600;
+  cursor: pointer; transition: background .15s, transform .05s;
+  overflow-wrap: anywhere;
+}
+button:hover:not(:disabled) { background: var(--accent-hover); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.secondary-button { background: #243349; border-color: var(--line); }
+.secondary-button:hover:not(:disabled) { background: #2f425d; }
+.actions button { flex: 1 1 140px; }
+#camera-start { min-width: 180px; padding-inline: 22px; }
+
+/* permission / error help */
+.permission-help {
+  padding: 14px 16px; border-radius: var(--radius);
+  border: 1px solid #7f3434; background: #291a24;
+}
+.permission-help h3 { margin-bottom: 4px; font-size: .95rem; }
+.permission-help p { color: #fecaca; font-size: .88rem; line-height: 1.5; overflow-wrap: anywhere; }
+.permission-help .actions { margin-top: 12px; }
+
+.tips { padding-left: 1.2em; color: var(--muted); font-size: .9rem; }
+.tips li { margin: 4px 0; }
+.tips b { color: var(--text); font-weight: 600; }
+
+.privacy-note { display: flex; gap: 8px; color: var(--muted); font-size: .8rem; }
+.privacy-icon { color: var(--ok); }
+
+footer { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; color: #64748b; font-size: .75rem; }
+
+/* ---------- Small screens ---------- */
+@media (max-width: 480px) {
+  .app { padding-top: 12px; gap: 12px; }
+  .subtitle { display: none; }
+  .actions button { flex: 1 1 100%; }
+  .card { padding: 12px 14px; }
+}
+
+/* Very wide / 4K: keep the content comfortably sized instead of tiny */
+@media (min-width: 1600px) {
+  .app { max-width: 1480px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
