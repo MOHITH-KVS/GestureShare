@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GestureShare — Camera</title>
+  <meta name="color-scheme" content="light dark">
+  <title>GestureShare</title>
   <link rel="stylesheet" href="camera.css">
 </head>
 
@@ -12,13 +13,13 @@
     <header class="topbar">
       <div class="brand">
         <div class="brand-icon" aria-hidden="true">G</div>
-        <div>
-          <h1>GestureShare</h1>
-          <p class="subtitle">Move files naturally.</p>
-        </div>
+        <h1>GestureShare</h1>
       </div>
-      <span class="version">BETA</span>
-      <button id="close-button" class="secondary-button" type="button">Close</button>
+      <span class="cam-state" id="cam-state" data-state="off" role="status">
+        <i aria-hidden="true"></i><span id="cam-state-text">Camera off</span>
+      </span>
+      <button id="tab-button" class="link-button" type="button" title="Open GestureShare in a full tab">Open in tab</button>
+      <button id="close-button" class="link-button" type="button">Close</button>
     </header>
 
     <main class="layout">
@@ -27,81 +28,195 @@
         <div class="camera-frame" id="camera-frame">
           <video id="camera" autoplay playsinline muted></video>
           <canvas id="hand-canvas" width="640" height="480" aria-hidden="true"></canvas>
-          <span class="frame-badge" id="live-badge" hidden>Live</span>
+
+          <!-- The file in your hand: follows your palm while you hold a fist -->
+          <div class="held-chip" id="held-chip" hidden aria-hidden="true">
+            <span class="held-icon">📄</span><span id="held-name">file</span>
+          </div>
+
+          <!-- One gesture at a time: what the camera sees right now -->
+          <div class="gesture-pill" id="gesture-pill" hidden aria-hidden="true">
+            <span id="gesture-icon">✋</span><span id="gesture-label">Open palm</span>
+          </div>
+
+          <!-- Hold-to-confirm / flick-power bar -->
+          <div class="hold-bar" id="hold-bar" hidden aria-hidden="true">
+            <span class="hold-label" id="hold-label">Hold to pick up</span>
+            <span class="hold-track"><span class="hold-fill" id="hold-fill"></span></span>
+          </div>
+
+          <!-- Big message in the middle of the camera: Picked up / Sent / Caught -->
+          <div class="banner" id="banner" data-kind="info" hidden role="status"></div>
+
+          <!-- Shown when the camera sees two hands -->
+          <div class="two-hands" id="two-hands" hidden role="alert">
+            <span class="two-icon" aria-hidden="true">🙌</span>
+            <span class="two-text">
+              <b>Two hands detected</b>
+              <span>Please show only one hand for smooth and reliable file sharing.</span>
+            </span>
+          </div>
 
           <div id="camera-placeholder" data-state="off">
             <div class="placeholder-icon" aria-hidden="true">✋</div>
             <div class="spinner" aria-hidden="true"></div>
             <p id="placeholder-title">Your camera is off</p>
-            <p id="placeholder-description">Turn on the camera to recognize hand gestures.</p>
-            <button id="camera-start" type="button">Enable Camera</button>
+            <p id="placeholder-description">Turn it on so GestureShare can see your hand.</p>
+            <button id="camera-start" type="button">Turn on camera</button>
           </div>
         </div>
       </section>
 
       <!-- Controls -->
-      <aside class="panel" aria-label="Gesture controls">
-        <div class="card status-card">
-          <div id="status-dot" class="status-dot" aria-hidden="true"></div>
-          <div>
-            <h2 id="status-title">Camera is off</h2>
-            <p id="gesture-status" role="status" aria-live="polite">
-              Enable your camera to start hand detection.
-            </p>
+      <aside class="panel" aria-label="GestureShare controls">
+
+        <!-- The one instruction that matters right now -->
+        <section class="coach" aria-live="polite">
+          <h2 id="coach-title">Turn on the camera</h2>
+          <p id="coach-sub">GestureShare uses your camera to see your hand. Nothing is recorded.</p>
+        </section>
+
+        <!-- Pair with another device -->
+        <section class="connect" id="connect" data-state="idle" aria-label="Connect a device">
+          <div id="connect-idle">
+            <div class="connect-head">
+              <b>Connect a device</b>
+              <span>Pair once, then throw files between the two.</span>
+            </div>
+            <div class="connect-actions">
+              <button id="host-btn" type="button">Show my code</button>
+              <span class="or">or</span>
+              <form id="join-form" autocomplete="off">
+                <input id="join-input" inputmode="numeric" maxlength="7" placeholder="Enter their code" aria-label="Code from the other device">
+                <button id="join-btn" class="secondary-button" type="submit">Connect</button>
+              </form>
+            </div>
           </div>
+          <div id="connect-waiting" hidden>
+            <span class="connect-label" id="connect-wait-label">Your code</span>
+            <div class="code" id="code-display" aria-live="polite">------</div>
+            <p id="connect-wait-text">Open GestureShare on the other device, choose "Enter their code", and type this number.</p>
+            <button id="cancel-connect" class="link-button" type="button">Cancel</button>
+          </div>
+          <div id="connect-connected" hidden>
+            <span class="live-dot" aria-hidden="true"></span>
+            <b>Connected</b>
+            <span class="connect-note">Files go straight to the other device.</span>
+            <button id="disconnect-btn" class="link-button" type="button">Disconnect</button>
+          </div>
+          <p class="connect-error" id="connect-error" role="alert" hidden></p>
+        </section>
+
+        <div class="tabs" role="tablist" aria-label="Send or receive">
+          <button id="tab-send" role="tab" aria-selected="true" aria-controls="view-send" type="button">Send</button>
+          <button id="tab-receive" role="tab" aria-selected="false" aria-controls="view-receive" type="button">Receive</button>
         </div>
 
-        <div class="card">
-          <div class="indicators" aria-hidden="true">
-            <span class="chip" id="chip-hand">Hand</span>
-            <span class="chip" id="chip-pinch">Pinch</span>
+        <!-- SEND -->
+        <section id="view-send" role="tabpanel" aria-labelledby="tab-send">
+          <div class="filebox" id="filebox">
+            <span class="file-icon" aria-hidden="true">📄</span>
+            <div class="file-text">
+              <b id="file-name">No file chosen</b>
+              <span id="file-meta">Choose a file, or drop one here.</span>
+            </div>
+            <button id="clear-file" class="link-button" type="button" hidden>Remove</button>
+          </div>
+          <div class="progress" id="send-progress" hidden>
+            <span id="send-progress-text">Sending…</span>
+            <span class="bar"><i id="send-progress-fill"></i></span>
+          </div>
+          <div class="actions">
+            <button id="choose-file" class="secondary-button" type="button">Choose file</button>
+            <button id="sample-file" class="secondary-button" type="button">Use a sample file</button>
+          </div>
+          <input id="file-input" type="file" hidden>
+
+          <ol class="steps" id="send-steps" aria-label="How to send">
+            <li data-step="grab">
+              <span class="step-icon" aria-hidden="true">✊</span>
+              <span class="step-text"><b>Make a fist</b><span>Hold it half a second to pick up the file</span></span>
+            </li>
+            <li data-step="throw">
+              <span class="step-icon" aria-hidden="true">👉</span>
+              <span class="step-text"><b>Flick your hand</b><span>A quick sideways flick sends it</span></span>
+            </li>
+          </ol>
+        </section>
+
+        <!-- RECEIVE -->
+        <section id="view-receive" role="tabpanel" aria-labelledby="tab-receive" hidden>
+          <div class="filebox incoming" id="incoming-box">
+            <span class="file-icon" aria-hidden="true">📥</span>
+            <div class="file-text">
+              <b id="incoming-name">Nothing incoming</b>
+              <span id="incoming-meta">When someone sends you a file, it shows up here.</span>
+            </div>
+          </div>
+          <div class="progress" id="recv-progress" hidden>
+            <span id="recv-progress-text">Receiving…</span>
+            <span class="bar"><i id="recv-progress-fill"></i></span>
+          </div>
+          <div class="actions" id="incoming-actions" hidden>
+            <button id="accept-incoming" type="button">Accept</button>
+            <button id="decline-incoming" class="secondary-button" type="button">Decline</button>
           </div>
 
-          <div class="meter-head" style="margin-top:14px" aria-hidden="true">
-            <span>Pinch strength</span>
-            <b id="meter-value">–</b>
-          </div>
-          <div class="meter" id="meter" aria-hidden="true">
-            <div class="meter-fill" id="meter-fill"></div>
-            <div class="meter-mark" id="meter-mark-on" title="Pinch starts here"></div>
-            <div class="meter-mark" id="meter-mark-off" title="Pinch ends here"></div>
-          </div>
-          <p id="debug-ratio" aria-hidden="true"></p>
-        </div>
+          <ol class="steps" id="receive-steps" aria-label="How to receive">
+            <li data-step="catch">
+              <span class="step-icon" aria-hidden="true">✋</span>
+              <span class="step-text"><b>Hold an open palm</b><span>Keep all five fingers out for half a second to catch the file</span></span>
+            </li>
+          </ol>
 
-        <div class="actions">
-          <button id="camera-stop" class="secondary-button" type="button" disabled>Stop Camera</button>
-        </div>
+          <div class="demo" id="demo">
+            <p>No device connected, so nothing can arrive for real. Use the demo to practise catching.</p>
+            <div class="actions">
+              <button id="simulate-incoming" class="secondary-button" type="button">Demo: send me a file</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="activity">
+          <h3>Recent activity</h3>
+          <ol class="log" id="log" aria-live="off"><li class="muted">Nothing yet.</li></ol>
+        </section>
+
+        <details class="advanced">
+          <summary>Gesture readings</summary>
+          <p id="debug-ratio">Show your hand to see live numbers.</p>
+          <p class="hint">Use these to tune the thresholds at the top of gestures.js if a gesture is hard to trigger.</p>
+        </details>
 
         <div id="permission-help" class="permission-help" role="alert" hidden>
           <h3>Camera access is needed</h3>
           <p id="permission-message">Allow camera access in Chrome to use hand gestures.</p>
           <div class="actions">
+            <button id="allow-button" type="button" hidden>Allow camera in a tab</button>
             <button id="help-button" class="secondary-button" type="button">How to enable camera</button>
           </div>
         </div>
 
-        <div class="card">
-          <ol class="tips">
-            <li>Hold <b>one hand</b> in front of the camera, palm facing it.</li>
-            <li><b>Pinch</b> your thumb and index finger to test recognition.</li>
-            <li>Watch the <b>Pinch</b> light and the strength bar react.</li>
-          </ol>
+        <div class="actions">
+          <button id="camera-stop" class="secondary-button" type="button" disabled>Turn off camera</button>
         </div>
 
         <p class="privacy-note">
           <span class="privacy-icon" aria-hidden="true">●</span>
-          <span>Camera processing stays on this device. Nothing is recorded or uploaded.</span>
+          <span>Your camera is processed on this device. Nothing is recorded or uploaded.</span>
         </p>
       </aside>
     </main>
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.1.0</span>
+      <span>v0.5.0</span>
     </footer>
   </div>
 
+  <script src="vendor/peerjs.min.js"></script>
+  <script src="transfer.js"></script>
+  <script src="gesture-engine.js"></script>
   <script src="gestures.js"></script>
 </body>
 </html>

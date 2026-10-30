@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GestureShare",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Transfer files between devices using hand gestures.",
   "action": {
     "default_title": "Open GestureShare"
@@ -9,7 +9,10 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage"],
+  "side_panel": {
+    "default_path": "camera.html"
+  },
+  "permissions": ["storage", "sidePanel"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
