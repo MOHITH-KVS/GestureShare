@@ -294,3 +294,6 @@ html[data-mode="setup"] .camera-frame { max-width: 560px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.connect-how { display: grid; gap: 4px; margin: 8px 0 12px; color: var(--muted); font-size: .9rem; }
+.connect-how b { color: var(--text); }

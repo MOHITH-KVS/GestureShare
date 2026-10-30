@@ -80,14 +80,18 @@
         <section class="connect" id="connect" data-state="idle" aria-label="Connect a device">
           <div id="connect-idle">
             <div class="connect-head">
-              <b>Connect a device</b>
-              <span>Pair once, then throw files between the two.</span>
+              <b>Link your two devices</b>
+              <span>Do this once, so a file can travel from one device to the other.</span>
             </div>
+            <ol class="connect-how">
+              <li><b>1.</b> On the first device, press <b>Show my code</b>. A 6-digit number appears.</li>
+              <li><b>2.</b> On the second device, type that number below.</li>
+            </ol>
             <div class="connect-actions">
               <button id="host-btn" type="button">Show my code</button>
               <span class="or">or</span>
               <form id="join-form" autocomplete="off">
-                <input id="join-input" inputmode="numeric" maxlength="7" placeholder="Enter their code" aria-label="Code from the other device">
+                <input id="join-input" inputmode="numeric" maxlength="7" placeholder="Type the code from the other device" aria-label="Code from the other device">
                 <button id="join-btn" class="secondary-button" type="submit">Connect</button>
               </form>
             </div>
