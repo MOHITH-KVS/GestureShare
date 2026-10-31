@@ -18,6 +18,7 @@
       <span class="cam-state" id="cam-state" data-state="off" role="status">
         <i aria-hidden="true"></i><span id="cam-state-text">Camera off</span>
       </span>
+      <button id="guide-button" class="link-button" type="button">How it works</button>
       <button id="tab-button" class="link-button" type="button" title="Open GestureShare in a full tab">Open in tab</button>
       <button id="close-button" class="link-button" type="button">Close</button>
     </header>
@@ -79,6 +80,19 @@
         <!-- Pair with another device -->
         <section class="connect" id="connect" data-state="idle" aria-label="Connect a device">
           <div id="connect-idle">
+            <!-- A device we remember: no code needed -->
+            <div id="paired-box" hidden>
+              <div class="connect-head">
+                <b id="paired-title">Your other device</b>
+                <span id="paired-sub">Remembered. They connect by themselves when GestureShare is open on both.</span>
+              </div>
+              <div class="connect-actions">
+                <button id="reconnect-btn" type="button">Connect now</button>
+                <button id="another-btn" class="link-button" type="button">Link a different device</button>
+                <button id="forget-btn" class="link-button" type="button">Forget this device</button>
+              </div>
+            </div>
+            <div id="pair-box">
             <div class="connect-head">
               <b>Link your two devices</b>
               <span>Do this once, so a file can travel from one device to the other.</span>
@@ -95,6 +109,8 @@
                 <button id="join-btn" class="secondary-button" type="submit">Connect</button>
               </form>
             </div>
+            <button id="pair-back" class="link-button" type="button" hidden>Back to my remembered device</button>
+            </div>
           </div>
           <div id="connect-waiting" hidden>
             <span class="connect-label" id="connect-wait-label">Your code</span>
@@ -104,7 +120,7 @@
           </div>
           <div id="connect-connected" hidden>
             <span class="live-dot" aria-hidden="true"></span>
-            <b>Connected</b>
+            <b id="connected-title">Connected</b>
             <span class="connect-note">Files go straight to the other device.</span>
             <button id="disconnect-btn" class="link-button" type="button">Disconnect</button>
           </div>
@@ -134,6 +150,7 @@
             <button id="choose-file" class="secondary-button" type="button">Choose file</button>
             <button id="sample-file" class="secondary-button" type="button">Use a sample file</button>
           </div>
+          <button id="send-now" type="button" disabled>Send now</button>
           <input id="file-input" type="file" hidden>
 
           <ol class="steps" id="send-steps" aria-label="How to send">
@@ -214,13 +231,32 @@
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.5.0</span>
+      <span>v0.6.0</span>
     </footer>
+  </div>
+
+
+  <!-- First-time guide: plain words, one idea per page -->
+  <div class="guide" id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-title">
+    <div class="guide-card">
+      <button class="guide-skip link-button" id="guide-skip" type="button">Skip</button>
+      <div class="guide-visual" id="guide-visual" aria-hidden="true"></div>
+      <h2 id="guide-title"></h2>
+      <p class="guide-text" id="guide-text"></p>
+      <ol class="guide-list" id="guide-list"></ol>
+      <p class="guide-or" id="guide-or" hidden></p>
+      <div class="guide-dots" id="guide-dots" aria-hidden="true"></div>
+      <div class="guide-nav">
+        <button class="secondary-button" id="guide-back" type="button">Back</button>
+        <button id="guide-next" type="button">Next</button>
+      </div>
+    </div>
   </div>
 
   <script src="vendor/peerjs.min.js"></script>
   <script src="transfer.js"></script>
   <script src="gesture-engine.js"></script>
   <script src="gestures.js"></script>
+  <script src="guide.js"></script>
 </body>
 </html>

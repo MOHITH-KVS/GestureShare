@@ -295,5 +295,42 @@ html[data-mode="setup"] .camera-frame { max-width: 560px; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+#send-now { width: 100%; padding: 10px 14px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 650; }
+#send-now:hover:not(:disabled) { background: var(--accent-hover); }
+#send-now:disabled { background: var(--surface-2); color: var(--muted); cursor: default; }
 .connect-how { display: grid; gap: 4px; margin: 8px 0 12px; color: var(--muted); font-size: .9rem; }
 .connect-how b { color: var(--text); }
+
+/* ---------- First-time guide ---------- */
+.guide { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(5, 8, 14, .78); backdrop-filter: blur(4px); }
+.guide[hidden] { display: none; }
+.guide-card { position: relative; width: min(520px, 100%); max-height: 100%; overflow: auto; padding: 28px 28px 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5); text-align: center; }
+.guide-skip { position: absolute; top: 12px; right: 12px; }
+.guide-visual { display: flex; justify-content: center; align-items: center; gap: 14px; min-height: 96px; margin: 6px 0 10px; }
+.gv { font-size: 54px; line-height: 1; }
+.gv.big { font-size: 76px; }
+.gv.arrow { font-size: 32px; color: var(--accent); }
+.guide-card h2 { margin: 0 0 8px; font-size: 24px; line-height: 1.25; }
+.guide-text { margin: 0 0 14px; color: var(--muted); font-size: 17px; line-height: 1.5; }
+.guide-list { margin: 0 0 14px; padding: 0; list-style: none; text-align: left; counter-reset: g; display: grid; gap: 10px; }
+.guide-list li { position: relative; padding: 12px 14px 12px 52px; background: var(--surface-2); border-radius: 12px; font-size: 16px; line-height: 1.45; }
+.guide-list.numbered li { counter-increment: g; }
+.guide-list.numbered li::before { content: counter(g); position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+.guide-list.bullets li::before { content: "✓"; position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ok); font-weight: 700; font-size: 18px; }
+.guide-or { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); color: var(--text); font-size: 16px; }
+.guide-dots { display: flex; justify-content: center; gap: 7px; margin: 4px 0 16px; }
+.guide-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.guide-dots i.on { background: var(--accent); width: 22px; border-radius: 4px; }
+.guide-nav { display: flex; gap: 10px; }
+.guide-nav button { flex: 1; min-height: 46px; font-size: 16px; }
+.guide-nav button[hidden] { display: none; }
+.gv.flick { animation: gv-flick 1.6s ease-in-out infinite; }
+.gv.fist { animation: gv-pulse 1.6s ease-in-out infinite; }
+.gv.palm { animation: gv-pulse 1.8s ease-in-out infinite; }
+@keyframes gv-flick { 0%, 40% { transform: translateX(-8px); } 60%, 100% { transform: translateX(14px); } }
+@keyframes gv-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .gv.flick, .gv.fist, .gv.palm { animation: none; } }
+@media (max-width: 480px) { .guide-card { padding: 22px 16px 16px; } .guide-card h2 { font-size: 21px; } .gv { font-size: 44px; } }
+#guide-next { border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 700; }
+#guide-next:hover { background: var(--accent-hover); }
+#guide-back { border-radius: 12px; }

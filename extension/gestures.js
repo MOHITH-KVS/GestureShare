@@ -85,6 +85,16 @@ const joinForm = document.getElementById("join-form");
 const joinInput = document.getElementById("join-input");
 const cancelConnect = document.getElementById("cancel-connect");
 const disconnectButton = document.getElementById("disconnect-btn");
+const pairedBox = document.getElementById("paired-box");
+const pairBox = document.getElementById("pair-box");
+const pairedTitle = document.getElementById("paired-title");
+const pairedSub = document.getElementById("paired-sub");
+const reconnectButton = document.getElementById("reconnect-btn");
+const forgetButton = document.getElementById("forget-btn");
+const anotherButton = document.getElementById("another-btn");
+const pairBackButton = document.getElementById("pair-back");
+const connectedTitle = document.getElementById("connected-title");
+const sendNowButton = document.getElementById("send-now");
 const sendProgress = document.getElementById("send-progress");
 const sendProgressText = document.getElementById("send-progress-text");
 const sendProgressFill = document.getElementById("send-progress-fill");
@@ -287,7 +297,7 @@ const link = new GestureLink({
 
 // The throw gesture: send the staged file to the connected device.
 function onThrow(file, direction) {
-  const arrow = ARROWS[direction];
+  const arrow = direction ? ARROWS[direction] : "";       // no direction = the "Send now" button
   if (!link.connected) {
     showBanner("Not connected: pair a device first", "warn", 2800);
     log(`Not sent: no device connected (${file.name})`);
@@ -300,8 +310,8 @@ function onThrow(file, direction) {
   try {
     outgoingName = file.name;
     link.sendFile(file.file || makeSampleFile(file));
-    showBanner(`Thrown ${arrow}  ${file.name}`, "ok");
-    log(`Threw ${file.name} ${arrow}`);
+    showBanner(`${direction ? "Thrown" : "Sending"} ${arrow}  ${file.name}`, "ok");
+    log(direction ? `Threw ${file.name} ${arrow}` : `Sending ${file.name}`);
   } catch (error) {
     showBanner("Could not send", "warn");
     log(`Could not send ${file.name}: ${error.message}`);
@@ -343,10 +353,27 @@ function showConnectError(message) {
   connectError.hidden = !message;
 }
 
+let showPair = false;          // the user chose "Link a different device"
+let lastConnect = { state: "idle", info: {} };
+
 function renderConnect(state, info = {}) {
+  lastConnect = { state, info };
   const connected = state === "connected";
+  const paired = info.paired || null;
+  const idleish = state === "idle" || state === "error";
+  if (!paired) showPair = false;
   connectBox.dataset.state = connected ? "connected" : "idle";
-  connectIdle.hidden = !(state === "idle" || state === "error");
+  connectIdle.hidden = !idleish;
+  pairedBox.hidden = !(idleish && paired && !showPair);
+  pairBox.hidden = !(idleish && (!paired || showPair));
+  pairBackButton.hidden = !(paired && showPair);
+  if (paired) {
+    pairedTitle.textContent = `Your ${paired.name}`;
+    pairedSub.textContent = info.offline
+      ? "It is not open right now. Open GestureShare on it and they connect by themselves."
+      : "Remembered. They connect by themselves when GestureShare is open on both.";
+  }
+  connectedTitle.textContent = paired ? `Connected to your ${paired.name}` : "Connected";
   connectWaiting.hidden = !(state === "waiting" || state === "connecting");
   connectConnected.hidden = !connected;
   showConnectError(state === "error" ? info.message : "");
@@ -356,9 +383,9 @@ function renderConnect(state, info = {}) {
     codeDisplay.textContent = `${info.code.slice(0, 3)} ${info.code.slice(3)}`;
     connectWaitText.textContent = "On the other device, open GestureShare and type this code. It connects by itself.";
   } else if (state === "connecting") {
-    connectWaitLabel.textContent = "Connecting…";
+    connectWaitLabel.textContent = info.reconnect && paired ? `Looking for your ${paired.name}…` : "Connecting…";
     codeDisplay.textContent = "• • •";
-    connectWaitText.textContent = "Looking for the other device.";
+    connectWaitText.textContent = info.reconnect ? "GestureShare must be open on that device." : "Looking for the other device.";
   }
 
   if (connected && lastLinkState !== "connected") {
@@ -377,6 +404,11 @@ function renderConnect(state, info = {}) {
 }
 
 hostButton.addEventListener("click", () => { link.host().catch(() => {}); });
+reconnectButton.addEventListener("click", () => { link.reconnect().catch(() => {}); });
+forgetButton.addEventListener("click", () => { link.forget(); showPair = false; log("Forgot the remembered device"); });
+anotherButton.addEventListener("click", () => { showPair = true; renderConnect(lastConnect.state, lastConnect.info); });
+pairBackButton.addEventListener("click", () => { showPair = false; renderConnect(lastConnect.state, lastConnect.info); });
+sendNowButton.addEventListener("click", () => { if (stagedFile) onThrow(stagedFile, null); });
 cancelConnect.addEventListener("click", () => link.disconnect());
 disconnectButton.addEventListener("click", () => { link.disconnect(); log("Disconnected"); });
 
@@ -676,6 +708,7 @@ function setCoach(title, sub, tone = "info") {
 
 // One instruction at a time: what to do next.
 function updateCoach(force = false) {
+  sendNowButton.disabled = !(stagedFile && link.connected && !link.outgoing);
   if (force) lastCoach = "";
   if (override) { setCoach(override.title, override.sub, override.tone); return; }
   if (!running) {
@@ -1328,6 +1361,10 @@ helpButton.addEventListener("click", () => {
 });
 
 window.addEventListener("pagehide", () => { stopCamera(false); link.disconnect(true); });
+
+// Stay findable for the remembered device, and reconnect to it without a code.
+renderConnect("idle", { paired: link.paired ? { name: link.paired.name } : null });
+if (MODE !== "setup") link.start().catch(() => {});
 
 closeButton?.addEventListener("click", () => {
   stopCamera(false);
