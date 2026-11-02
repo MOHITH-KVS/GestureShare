@@ -77,52 +77,70 @@
           <p id="coach-sub">GestureShare uses your camera to see your hand. Nothing is recorded.</p>
         </section>
 
-        <!-- Pair with another device -->
-        <section class="connect" id="connect" data-state="idle" aria-label="Connect a device">
-          <div id="connect-idle">
-            <!-- A device we remember: no code needed -->
-            <div id="paired-box" hidden>
+        <!-- Devices -->
+        <section class="devices" id="connect" aria-label="Devices">
+          <div class="me-row">
+            <span class="me-label">This device is called</span>
+            <b id="me-name">This device</b>
+            <button id="rename-btn" class="link-button" type="button">Rename</button>
+            <form id="rename-form" hidden>
+              <input id="rename-input" maxlength="40" aria-label="Name of this device" autocomplete="off">
+              <button class="secondary-button" type="submit">Save</button>
+            </form>
+          </div>
+
+          <div class="dev-section" id="sec-mine">
+            <div class="dev-head">
+              <b>My devices</b>
+              <span>Your own computers and devices you trust. Their files arrive by themselves.</span>
+            </div>
+            <ul class="device-list" id="list-mine" aria-live="polite"></ul>
+            <p class="devices-empty" id="empty-mine">None yet. Sign into Chrome with the same Google account on your other computer, and it appears here by itself.</p>
+          </div>
+
+          <div class="dev-section" id="sec-other">
+            <div class="dev-head">
+              <b>Other devices</b>
+              <span>A friend’s device, or one you are not sure about. It asks you before any file is accepted.</span>
+            </div>
+            <ul class="device-list" id="list-other" aria-live="polite"></ul>
+            <p class="devices-empty" id="empty-other">None yet.</p>
+            <button id="add-device" class="secondary-button" type="button">+ Link another device with a code</button>
+          <div class="pair" id="pair-panel" hidden>
+            <div id="connect-idle">
               <div class="connect-head">
-                <b id="paired-title">Your other device</b>
-                <span id="paired-sub">Remembered. They connect by themselves when GestureShare is open on both.</span>
+                <b>Link a device with a code</b>
+                <span>For a friend’s computer, or one that is not on your Chrome account. It will go under “Other devices”.</span>
               </div>
+              <ol class="connect-how">
+                <li><b>1.</b> On the first device, press <b>Show my code</b>. A 6-digit number appears.</li>
+                <li><b>2.</b> On the second device, type that number.</li>
+              </ol>
               <div class="connect-actions">
-                <button id="reconnect-btn" type="button">Connect now</button>
-                <button id="another-btn" class="link-button" type="button">Link a different device</button>
-                <button id="forget-btn" class="link-button" type="button">Forget this device</button>
+                <button id="host-btn" type="button">Show my code</button>
+                <span class="or">or</span>
+                <form id="join-form" autocomplete="off">
+                  <input id="join-input" inputmode="numeric" maxlength="7" placeholder="Type the code from the other device" aria-label="Code from the other device">
+                  <button id="join-btn" class="secondary-button" type="submit">Connect</button>
+                </form>
+              </div>
+              <button id="pair-close" class="link-button" type="button">Close</button>
+            </div>
+            <div id="connect-waiting" hidden>
+              <span class="connect-label" id="connect-wait-label">Your code</span>
+              <div class="code" id="code-display" aria-live="polite">------</div>
+              <p id="connect-wait-text">On the other device, open GestureShare, press “+ Link another device with a code”, and type this number.</p>
+              <button id="cancel-connect" class="link-button" type="button">Cancel</button>
+            </div>
+            <div id="pair-confirm" hidden role="alert">
+              <b id="confirm-title">A device wants to link</b>
+              <p>Only allow it if this is a device you know.</p>
+              <div class="connect-actions">
+                <button id="confirm-allow" type="button">Allow</button>
+                <button id="confirm-deny" class="secondary-button" type="button">Don’t allow</button>
               </div>
             </div>
-            <div id="pair-box">
-            <div class="connect-head">
-              <b>Link your two devices</b>
-              <span>Do this once, so a file can travel from one device to the other.</span>
-            </div>
-            <ol class="connect-how">
-              <li><b>1.</b> On the first device, press <b>Show my code</b>. A 6-digit number appears.</li>
-              <li><b>2.</b> On the second device, type that number below.</li>
-            </ol>
-            <div class="connect-actions">
-              <button id="host-btn" type="button">Show my code</button>
-              <span class="or">or</span>
-              <form id="join-form" autocomplete="off">
-                <input id="join-input" inputmode="numeric" maxlength="7" placeholder="Type the code from the other device" aria-label="Code from the other device">
-                <button id="join-btn" class="secondary-button" type="submit">Connect</button>
-              </form>
-            </div>
-            <button id="pair-back" class="link-button" type="button" hidden>Back to my remembered device</button>
-            </div>
           </div>
-          <div id="connect-waiting" hidden>
-            <span class="connect-label" id="connect-wait-label">Your code</span>
-            <div class="code" id="code-display" aria-live="polite">------</div>
-            <p id="connect-wait-text">Open GestureShare on the other device, choose "Enter their code", and type this number.</p>
-            <button id="cancel-connect" class="link-button" type="button">Cancel</button>
-          </div>
-          <div id="connect-connected" hidden>
-            <span class="live-dot" aria-hidden="true"></span>
-            <b id="connected-title">Connected</b>
-            <span class="connect-note">Files go straight to the other device.</span>
-            <button id="disconnect-btn" class="link-button" type="button">Disconnect</button>
           </div>
           <p class="connect-error" id="connect-error" role="alert" hidden></p>
         </section>
@@ -149,6 +167,10 @@
           <div class="actions">
             <button id="choose-file" class="secondary-button" type="button">Choose file</button>
             <button id="sample-file" class="secondary-button" type="button">Use a sample file</button>
+          </div>
+          <div class="send-to" id="send-to" hidden>
+            <span class="send-to-label" id="send-to-label">Send to</span>
+            <div class="chips" id="send-to-chips" role="radiogroup" aria-labelledby="send-to-label"></div>
           </div>
           <button id="send-now" type="button" disabled>Send now</button>
           <input id="file-input" type="file" hidden>
@@ -231,7 +253,7 @@
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.6.0</span>
+      <span>v0.7.1</span>
     </footer>
   </div>
 

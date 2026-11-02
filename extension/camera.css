@@ -334,3 +334,68 @@ html[data-mode="setup"] .camera-frame { max-width: 560px; }
 #guide-next { border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 700; }
 #guide-next:hover { background: var(--accent-hover); }
 #guide-back { border-radius: 12px; }
+
+/* ---------- My devices ---------- */
+.devices { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); display: grid; gap: 10px; }
+.devices-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.devices-head b { font-size: 1rem; }
+.devices-head button[hidden] { display: none; }
+.me-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .9rem; }
+.me-label { color: var(--muted); }
+.me-row b[hidden], .me-row button[hidden], .me-row form[hidden] { display: none; }
+#rename-form { display: flex; gap: 6px; flex: 1; min-width: 0; }
+#rename-input { flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+.device-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.device-list:empty { display: none; }
+.device { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: start; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.device .dot { width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: #5b6a85; }
+.device[data-online="true"] .dot { background: var(--ok); box-shadow: 0 0 0 4px rgba(52, 211, 153, .2); }
+.device .d-text { display: grid; gap: 2px; min-width: 0; }
+.device .d-text b { overflow-wrap: anywhere; }
+.device .d-text span { color: var(--muted); font-size: .85rem; }
+.device .d-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-weight: 600; font-size: .85rem; }
+.chip-btn.yes { background: var(--accent); border-color: transparent; color: #fff; }
+.devices-empty { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.45; }
+.devices-empty[hidden] { display: none; }
+.pair { padding-top: 10px; border-top: 1px solid var(--line); }
+.pair [hidden] { display: none; }
+#pair-confirm { display: grid; gap: 6px; }
+#pair-confirm p { margin: 0; color: var(--muted); font-size: .9rem; }
+#confirm-allow { padding: 9px 16px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font-weight: 650; }
+.send-to { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0; }
+.send-to[hidden] { display: none; }
+.send-to-label { color: var(--muted); font-size: .9rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-weight: 600; font-size: .9rem; }
+.chip[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.chip.fixed { border-style: dashed; }
+
+/* ---------- Device sections ---------- */
+.dev-section { display: grid; gap: 8px; }
+.dev-section + .dev-section { padding-top: 12px; border-top: 1px solid var(--line); }
+.dev-head { display: grid; gap: 1px; }
+.dev-head b { font-size: 1rem; }
+.dev-head span { color: var(--muted); font-size: .85rem; line-height: 1.4; }
+#add-device { justify-self: start; }
+#add-device[hidden] { display: none; }
+.pair { margin-top: 4px; }
+
+/* ---------- Small windows: the side panel ---------- */
+.topbar { flex-wrap: wrap; row-gap: 2px; }
+.link-button, .cam-state { white-space: nowrap; }
+.brand h1 { white-space: nowrap; }
+@media (max-width: 520px) {
+  .topbar { gap: 4px; }
+  .brand { gap: 8px; }
+  .brand-icon { width: 30px; height: 30px; font-size: 15px; }
+  .brand h1 { font-size: 1rem; }
+  /* the camera state shrinks to its coloured dot (its text stays for screen readers) */
+  .cam-state { gap: 0; padding: 0 6px; }
+  .cam-state > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .link-button { padding: 6px; }
+  .devices { padding: 12px; }
+  .device { padding: 9px 10px; }
+  .dev-head span { font-size: .82rem; }
+}
+@media (max-width: 340px) { .brand h1 { display: none; } }

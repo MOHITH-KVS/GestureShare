@@ -1,72 +1,80 @@
 // ---------------------------------------------------------------------------------------------
-// GestureShare: device-to-device connection and file transfer
+// GestureShare: many devices, direct file transfer
 //
 // How it works (no file ever touches a server):
-//   FIRST TIME   One device calls host() and shows a 6-digit code; the other calls join(code).
-//                Both devices then remember each other (a long secret is exchanged on the way).
-//   AFTER THAT   Every GestureShare page stays "findable" under the device's own private id.
-//                start() / reconnect() connect to the remembered device with no code at all, and
-//                the remembered secret proves it really is the same device.
-//   TRANSFER     A tiny matchmaker server (PeerJS) only introduces the two browsers. After that
-//                they talk directly (WebRTC): the file travels straight from one device to the
-//                other in big pieces, with back-pressure so a slow receiver is never flooded.
-//                The receiver must accept (the open-palm "catch") before any bytes are sent.
+//   YOUR DEVICES   Every device has a private id and stays "findable" while GestureShare is open.
+//                  Devices signed into the same Chrome account find each other by themselves: the
+//                  extension keeps a shared link key in chrome.storage.sync (Chrome's own sync).
+//   OTHER DEVICES  Link once with a 6-digit code (a friend's laptop, or a computer without Chrome
+//                  sync). The host must allow the new device. After that they find each other too.
+//   PROOF          Two linked devices prove who they are with a challenge/response (HMAC), so
+//                  nobody can pretend to be a device, even if it is offline when they try.
+//   TRANSFER       A tiny matchmaker server (PeerJS) only introduces browsers. After that they talk
+//                  directly (WebRTC). The receiver must accept before any bytes move, unless the
+//                  sender is a device the person marked "accept automatically".
 //
-// Messages on the channel (text = JSON control message, binary = a piece of the file):
-//   {t:"hello", kind:"pair"|"resume", deviceId, name, secret?}   joiner -> listener, first message
-//   {t:"welcome", kind, deviceId, name, secret?} | {t:"refuse", reason}                 the answer
-//   {t:"offer", id, name, size, mime}   sender  -> receiver   "I want to send you this"
-//   {t:"accept", id} | {t:"decline", id, reason}               receiver's answer
-//   <binary pieces...>
-//   {t:"done", id}                      sender  -> receiver   "that was the last piece"
-//   {t:"ack", id, ok, bytes}            receiver -> sender    "got it" (checks the byte count)
-//   {t:"cancel", id}                    either side, stops the transfer
+// Messages on a channel (text = JSON control message, binary = a piece of the file):
+//   {t:"hello", kind:"pair"|"resume", deviceId, name, nonce?}   dialler -> listener, first message
+//   {t:"challenge", nonce, proof, name}   listener -> dialler  (resume only: proves the listener first)
+//   {t:"auth", proof}                     dialler -> listener  (resume only)
+//   {t:"welcome", kind, deviceId, name, secret?} | {t:"refuse", reason}
+//   {t:"name", name}                      a device was renamed
+//   {t:"offer", id, name, size, mime} / {t:"accept", id} / {t:"decline", id, reason}
+//   <binary pieces...> / {t:"done", id} / {t:"ack", id, ok, bytes} / {t:"cancel", id}
 //
-// Usage (callbacks are all optional):
+// Usage (all callbacks are optional):
 //   const link = new GestureLink({
-//     signal,                                   // {host, port, path, secure}; default: public PeerJS
-//     onStatus(state, info),                    // "idle" | "waiting" {code} | "connecting" | "connected" | "error" {message}
-//                                               // info.paired = {name} when a device is remembered; info.offline = true
-//                                               // when it could not be found (not an error, it just is not open)
-//     onOffer({id, name, size}),                // the other device wants to send you a file
-//     onOfferGone(id, reason),                  // ...and then cancelled / the connection dropped
-//     onProgress(direction, id, bytes, total),  // direction: "send" | "receive"
-//     onReceived(offer, blob),                  // a whole file arrived and its size checks out
-//     onSendState(id, state, detail)            // "waiting" | "sending" | "delivered" | "declined" | "expired" | "failed"
+//     signal,                                  // {host, port, path, secure}; default: public PeerJS
+//     onDevices(list),                         // [{id, name, online, auto, source, stale, label}] after every change
+//     onPairing(state, info),                  // "idle" | "waiting" {code} | "confirm" {name, allow(), deny()} | "connecting" | "error" {message}
+//     onEvent({type, device, message}),        // "connected" | "disconnected" | "paired" | "refused"
+//     onOffer({id, from, name, size, mime, auto}),
+//     onOfferGone(id, reason),
+//     onProgress(direction, id, bytes, total),
+//     onReceived(offer, blob),
+//     onSendState(id, state, detail)           // "waiting" | "sending" | "delivered" | "declined" | "expired" | "failed"
 //   });
-//   link.start()                                // call once when the page opens: stay findable + reconnect
-//   link.host() / link.join("123456")           // first-time pairing
-//   link.reconnect() / link.forget()            // remembered device
-//   link.sendFile(file) / link.accept(id) / link.reject(id) / link.disconnect()
+//   link.start()                               // once, when the page opens
+//   link.host() / link.join("123456") / link.cancelPairing()
+//   link.sendFile(file, toDeviceId?) / link.accept(id) / link.reject(id) / link.cancelSend()
+//   link.setAuto(id, true|false) / link.remove(id) / link.setName(text) / link.setTarget(id)
 //
 // Loads PeerJS from vendor/peerjs.min.js (a classic script, so window.Peer exists).
 // ---------------------------------------------------------------------------------------------
 (function (root) {
   "use strict";
 
-  // The matchmaker. The free public PeerJS server is fine for trying things out; before launch,
-  // run your own and put its address here (or pass `signal` to the constructor).
   const SIGNALING = { host: "0.peerjs.com", port: 443, path: "/", secure: true };
 
-  const CODE_PREFIX = "gestureshare-";           // temporary ids used while a code is shown
-  const DEVICE_PREFIX = "gestureshare-d-";       // a device's permanent private id
-  const CHUNK = 256 * 1024;            // size of one piece on the wire (lowered if the other side only allows less)
-  const READ_BLOCK = 1024 * 1024;      // how much of the file we read from disk at once
-  const BUFFER_HIGH = 4 * 1024 * 1024; // pause sending when this much is waiting to go out
-  const BUFFER_LOW = 1024 * 1024;      // ...and resume below this
-  const OFFER_TIMEOUT_MS = 60000;      // how long the sender waits for the other device to accept
+  const CODE_PREFIX = "gestureshare-";
+  const DEVICE_PREFIX = "gestureshare-d-";
+  const CHUNK = 256 * 1024;
+  const READ_BLOCK = 1024 * 1024;
+  const BUFFER_HIGH = 4 * 1024 * 1024;
+  const BUFFER_LOW = 1024 * 1024;
+  const OFFER_TIMEOUT_MS = 60000;
   const CONNECT_TIMEOUT_MS = 15000;
   const HANDSHAKE_TIMEOUT_MS = 10000;
+  const CODE_LIFETIME_MS = 120000;
+  const CONFIRM_TIMEOUT_MS = 60000;
+  const REDIAL_MS = 20000;
+  const PING_MS = 5000;               // keep-alive: a device that vanishes without saying goodbye is noticed
+  const DEAD_MS = 16000;
+
   const KEY_ME = "gestureshare.me";
-  const KEY_PAIR = "gestureshare.pair";
+  const KEY_NAME = "gestureshare.name";
+  const KEY_DEVICES = "gestureshare.devices";
+  const KEY_TARGET = "gestureshare.target";
+  const KEY_PAIR_OLD = "gestureshare.pair";     // the single remembered device of earlier versions
+  const KEY_ACCOUNT = "gs.account";             // in chrome.storage.sync
 
   const noop = () => {};
-  const randomHex = bytes => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, "0")).join("");
-  const randomId = () => randomHex(4);
+  const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  const randomHex = n => hex(crypto.getRandomValues(new Uint8Array(n)));
   const randomCode = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
   const cleanName = name => String(name || "file").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 200) || "file";
+  const cleanLabel = name => String(name || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 40);
 
-  // Small storage helper: localStorage when it works, memory when it does not.
   const memory = {};
   const store = {
     get(key) { try { const v = root.localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return memory[key] || null; } },
@@ -74,7 +82,7 @@
     remove(key) { try { root.localStorage.removeItem(key); } catch { delete memory[key]; } }
   };
 
-  function deviceName() {
+  function defaultDeviceName() {
     const platform = (root.navigator && ((root.navigator.userAgentData && root.navigator.userAgentData.platform) || root.navigator.platform)) || "";
     if (/win/i.test(platform)) return "Windows computer";
     if (/mac/i.test(platform)) return "Mac";
@@ -82,16 +90,43 @@
     if (/android/i.test(platform)) return "Android phone";
     if (/iphone|ipad|ios/i.test(platform)) return "iPhone";
     if (/linux/i.test(platform)) return "Linux computer";
-    return "other device";
+    return "Other device";
+  }
+
+  // Chrome's own sync keeps a small record for the signed-in account. Works as a plain local store
+  // when Chrome is not signed in (then devices simply do not appear on each other).
+  function chromeAccountStore() {
+    const area = root.chrome && root.chrome.storage && root.chrome.storage.sync;
+    if (!area) return null;
+    return {
+      get: () => new Promise(resolve => { try { area.get(KEY_ACCOUNT, r => resolve((!root.chrome.runtime.lastError && r && r[KEY_ACCOUNT]) || null)); } catch { resolve(null); } }),
+      set: value => new Promise(resolve => { try { area.set({ [KEY_ACCOUNT]: value }, () => { void root.chrome.runtime.lastError; resolve(); }); } catch { resolve(); } }),
+      onChange: cb => { try { root.chrome.storage.onChanged.addListener((changes, areaName) => { if (areaName === "sync" && changes[KEY_ACCOUNT]) cb(changes[KEY_ACCOUNT].newValue || null); }); } catch {} }
+    };
+  }
+
+  const encoder = new TextEncoder();
+  async function hmac(secret, text) {
+    const key = await crypto.subtle.importKey("raw", encoder.encode(String(secret)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(text))));
+  }
+  function sameText(a, b) {
+    if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+    let d = 0;
+    for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return d === 0;
   }
 
   class GestureLink {
     constructor(options = {}) {
-      const test = root.GESTURE_LINK_CONFIG || {};          // only used by automated tests
+      const test = root.GESTURE_LINK_CONFIG || {};
       this.signal = options.signal || test.signaling || SIGNALING;
       this.iceServers = options.iceServers || test.iceServers;
+      this.accountStore = "accountStore" in test ? test.accountStore : chromeAccountStore();
       this.cb = {
-        status: options.onStatus || noop,
+        devices: options.onDevices || noop,
+        pairing: options.onPairing || noop,
+        event: options.onEvent || noop,
         offer: options.onOffer || noop,
         offerGone: options.onOfferGone || noop,
         progress: options.onProgress || noop,
@@ -101,26 +136,91 @@
 
       this.me = store.get(KEY_ME);
       if (!this.me || !this.me.id) { this.me = { id: randomHex(16) }; store.set(KEY_ME, this.me); }
-      this.name = deviceName();
-      this.paired = store.get(KEY_PAIR);                    // {id, name, secret} or null
+      this.name = cleanLabel(store.get(KEY_NAME)) || defaultDeviceName();
 
-      this.presence = null;       // stays open while the page is open, so the paired device can find us
-      this.peer = null;           // temporary peer: shows a code (host) or dials out (join / reconnect)
-      this.conn = null;           // the trusted connection to the other device
-      this.pending = null;        // a connection that is still doing the hello/welcome check
-      this.outKind = null;        // "pair" | "resume" while we are dialling out
-      this.code = null;
-      this.state = "idle";
-      this.outgoing = null;       // {id, file, resolveAnswer, rejectAnswer, ack, timer}   (while sending)
-      this.incoming = null;       // {id, name, size, mime, chunks, got, accepted}          (while receiving)
+      this.devices = new Map();          // id -> {id, name, secret, auto, source, stale}
+      for (const d of store.get(KEY_DEVICES) || []) if (d && d.id && d.secret) this.devices.set(d.id, d);
+      const old = store.get(KEY_PAIR_OLD);                // move the single device of earlier versions
+      if (old && old.id && old.secret && !this.devices.has(old.id)) {
+        this.devices.set(old.id, { id: old.id, name: old.name || "Other device", secret: old.secret, auto: null, source: "code" });
+        this._saveDevices();
+      }
+      if (old) store.remove(KEY_PAIR_OLD);
+
+      this.accountKey = null;
+      this.sessions = new Map();         // id -> {conn, dev, outgoing, incoming}   trusted connections
+      this.dialing = new Map();          // id -> conn   outgoing attempts that are not trusted yet
+      this.failers = new Map();          // remote peer id -> fn(err)   for "peer-unavailable"
+      this.presence = null;              // our permanent peer: others find us through it
+      this.dialPeer = null;              // used for dialling when we do not own the presence peer
+      this.hostPeer = null;
+      this.hostTimer = null;
+      this.pairState = "idle";
+      this.stopped = false;
+      this.redialTimer = null;
     }
 
-    get connected() { return this.state === "connected"; }
+    // ---- what the page can read ---------------------------------------------------------------
 
-    _set(state, info = {}) {
-      this.state = state;
-      const extra = { paired: this.paired ? { name: this.paired.name } : null };
-      try { this.cb.status(state, Object.assign(extra, info)); } catch (e) { console.error(e); }
+    get connected() { return this.sessions.size > 0; }
+
+    /** The devices, newest state first for the page: online ones first. */
+    list() {
+      const names = new Map();
+      for (const d of this.devices.values()) names.set(d.name, (names.get(d.name) || 0) + 1);
+      const out = [];
+      for (const d of this.devices.values()) {
+        out.push({
+          id: d.id, name: d.name, auto: d.auto, source: d.source, stale: !!d.stale,
+          online: this.sessions.has(d.id),
+          label: names.get(d.name) > 1 ? `${d.name} (${d.id.slice(0, 4).toUpperCase()})` : d.name
+        });
+      }
+      out.sort((a, b) => (b.online - a.online) || a.label.localeCompare(b.label));
+      return out;
+    }
+
+    /** Where a file goes: the chosen device if it is online, else the only online device, else null. */
+    target() {
+      const online = this.list().filter(d => d.online);
+      const chosen = store.get(KEY_TARGET);
+      if (chosen && online.some(d => d.id === chosen)) return chosen;
+      return online.length ? online[0].id : null;
+    }
+    setTarget(id) { if (this.sessions.has(id)) { store.set(KEY_TARGET, id); this._emitDevices(); } }
+
+    /** The file being sent to the target device, if any. */
+    get outgoing() { const s = this.sessions.get(this.target()); return s ? s.outgoing : null; }
+
+    _emitDevices() { try { this.cb.devices(this.list()); } catch (e) { console.error(e); } }
+    _event(type, dev, message) { try { this.cb.event({ type, device: dev ? { id: dev.id, name: dev.name } : null, message }); } catch (e) { console.error(e); } }
+    _setPair(state, info = {}) { this.pairState = state; try { this.cb.pairing(state, info); } catch (e) { console.error(e); } }
+    _saveDevices() { store.set(KEY_DEVICES, Array.from(this.devices.values())); }
+
+    // ---- lifecycle ----------------------------------------------------------------------------
+
+    /** Call once when the page opens: join the account, stay findable, connect to every known device. */
+    async start() {
+      this.stopped = false;
+      this._emitDevices();
+      await this._startPresence();
+      this._syncAccount().catch(noop);
+      if (this.accountStore && this.accountStore.onChange) this.accountStore.onChange(value => this._syncAccount(value).catch(noop));
+      this._redialAll();
+      clearInterval(this.redialTimer);
+      this.redialTimer = setInterval(() => this._redialAll(), REDIAL_MS);
+    }
+
+    /** Close everything (the page is closing). Linked devices stay linked. */
+    stop() {
+      this.stopped = true;
+      clearInterval(this.redialTimer);
+      this.cancelPairing(true);
+      for (const s of Array.from(this.sessions.values())) this._dropSession(s, "disconnected", true);
+      for (const c of Array.from(this.dialing.values())) { try { c.gs.done = true; c.close(); } catch {} }
+      this.dialing.clear();
+      for (const p of [this.presence, this.dialPeer]) { try { p && p.destroy(); } catch {} }
+      this.presence = this.dialPeer = null;
     }
 
     _newPeer(id) {
@@ -131,13 +231,12 @@
       return id ? new root.Peer(id, options) : new root.Peer(options);
     }
 
-    // ---- staying findable + remembered device -------------------------------------------------
-
-    /** Call once when the page opens. Stays findable, and reconnects to the remembered device. */
-    async start() {
-      await this._startPresence();
-      if (this.paired && this.state === "idle") this.reconnect(true).catch(noop);
-      else if (this.state === "idle") this._set("idle", {});
+    _peerError(err) {
+      if (err && err.type === "peer-unavailable") {
+        const m = /peer\s+(\S+)/.exec(err.message || "");
+        const fail = m && this.failers.get(m[1]);
+        if (fail) fail({ type: "peer-unavailable" });
+      }
     }
 
     _startPresence() {
@@ -148,296 +247,428 @@
         this.presence = peer;
         const timer = setTimeout(() => resolve(false), 8000);
         peer.on("open", () => { clearTimeout(timer); resolve(true); });
-        peer.on("connection", conn => { conn.gsMode = "resume"; this._wire(conn); });
+        peer.on("connection", conn => this._wire(conn, { role: "listener", mode: "device" }));
         peer.on("error", err => {
-          clearTimeout(timer);
-          // Another page of this same extension (same browser profile) already owns this device id.
-          // That page does the listening; this one can still pair with a code.
-          if (err.type === "unavailable-id") { try { peer.destroy(); } catch {} if (this.presence === peer) this.presence = null; }
-          resolve(false);
+          this._peerError(err);
+          if (err.type === "unavailable-id") {       // another page of this profile already listens; that one does the listening
+            clearTimeout(timer);
+            try { peer.destroy(); } catch {}
+            if (this.presence === peer) this.presence = null;
+            resolve(false);
+          }
         });
         peer.on("disconnected", () => { try { peer.reconnect(); } catch {} });
       });
     }
 
-    /** Forget the remembered device (it will need a code again). */
-    forget() {
-      this.paired = null;
-      store.remove(KEY_PAIR);
-      this._set(this.state, {});
-    }
-
-    /** Connect to the remembered device, no code needed. `auto` = quiet: not finding it is not an error. */
-    reconnect(auto = false) {
-      if (!this.paired) return Promise.reject(new Error("No device is remembered yet."));
-      this._closeEverything();
+    // A peer we can dial from: the presence peer when it is open, else a separate one.
+    _dialer() {
+      if (this.presence && this.presence.open) return Promise.resolve(this.presence);
+      if (this.dialPeer && this.dialPeer.open) return Promise.resolve(this.dialPeer);
       return new Promise((resolve, reject) => {
-        this.outKind = "resume";
-        this._set("connecting", { reconnect: true });
-        let peer;
-        try { peer = this._newPeer(); } catch (error) { this._fail(error, reject); return; }
-        this.peer = peer;
-        const timer = setTimeout(() => finish({ type: "timeout" }), CONNECT_TIMEOUT_MS);
-        const finish = err => {
-          clearTimeout(timer);
-          if (this.peer !== peer) return;                      // we were replaced (the other device dialled us first)
-          const name = this.paired ? this.paired.name : "other device";
-          if (auto) {
-            this._closeEverything();
-            this._set("idle", { offline: true });
-            resolve(false);
-          } else {
-            this._fail(err.type === "peer-unavailable" || err.type === "timeout"
-              ? { message: `Your ${name} is not open right now. Open GestureShare on it, then try again.` } : err, reject);
-          }
-        };
-        peer.on("open", () => {
-          if (this.peer !== peer) return;
-          const conn = peer.connect(DEVICE_PREFIX + this.paired.id, { serialization: "raw", reliable: true });
-          conn.gsMode = "out-resume";
-          conn.gsDone = ok => { clearTimeout(timer); resolve(ok); };
-          conn.gsFail = finish;
-          this._wire(conn);
-        });
-        peer.on("error", finish);
+        if (!this.dialPeer) {
+          let peer;
+          try { peer = this._newPeer(); } catch (e) { reject(e); return; }
+          this.dialPeer = peer;
+          peer.on("error", err => { this._peerError(err); if (!peer.open && this.dialPeer === peer) { this.dialPeer = null; } });
+          peer.on("disconnected", () => { try { peer.reconnect(); } catch {} });
+          peer.on("connection", conn => this._wire(conn, { role: "listener", mode: "device" }));
+        }
+        const peer = this.dialPeer;
+        const timer = setTimeout(() => reject(new Error("timeout")), CONNECT_TIMEOUT_MS);
+        const check = () => { clearTimeout(timer); resolve(peer); };
+        if (peer.open) check(); else peer.once("open", check);
       });
     }
 
-    // ---- first-time pairing with a code -----------------------------------------------------
+    // ---- your account's devices (Chrome sync) -------------------------------------------------
 
-    /** Show a code on this device and wait for the other one to enter it. Resolves with the code. */
+    async _syncAccount(remote) {
+      const acc = this.accountStore;
+      if (!acc) return;
+      let rec = remote !== undefined ? remote : await acc.get();
+      let write = false;
+      if (!rec || typeof rec.key !== "string" || !rec.key) { rec = { key: randomHex(24), devices: {} }; write = true; }
+      rec.devices = rec.devices && typeof rec.devices === "object" ? rec.devices : {};
+      if (this.accountKey && this.accountKey !== rec.key && this.accountKey < rec.key) { rec.key = this.accountKey; write = true; }   // two keys created at once: the smaller wins everywhere
+      const mine = rec.devices[this.me.id];
+      if (!mine || mine.name !== this.name) { rec.devices[this.me.id] = { name: this.name }; write = true; }
+      this.accountKey = rec.key;
+
+      let changed = false;
+      for (const [id, info] of Object.entries(rec.devices)) {
+        if (id === this.me.id || !info) continue;
+        const name = cleanLabel(info.name) || "Other device";
+        const d = this.devices.get(id);
+        if (!d || d.source !== "account" || d.secret !== rec.key || d.name !== name) {
+          this.devices.set(id, { id, name, secret: rec.key, auto: d && d.auto !== null && d.auto !== undefined ? d.auto : true, source: "account" });
+          changed = true;
+        }
+      }
+      if (write) await acc.set(rec);
+      if (changed) { this._saveDevices(); this._emitDevices(); this._redialAll(); }
+    }
+
+    // ---- names, trust, forgetting -------------------------------------------------------------
+
+    setName(text) {
+      const name = cleanLabel(text);
+      if (!name || name === this.name) return;
+      this.name = name;
+      store.set(KEY_NAME, name);
+      for (const s of this.sessions.values()) { try { this._send(s, { t: "name", name }); } catch {} }
+      this._syncAccount().catch(noop);
+      this._emitDevices();
+    }
+
+    /** true = accept this device's files automatically, false = ask every time. */
+    setAuto(id, value) {
+      const d = this.devices.get(id);
+      if (!d) return;
+      d.auto = !!value;
+      this._saveDevices();
+      this._emitDevices();
+    }
+
+    /** Forget a device linked with a code. (Devices from your Chrome account come back by themselves.) */
+    remove(id) {
+      const d = this.devices.get(id);
+      if (!d || d.source === "account") return false;
+      const s = this.sessions.get(id);
+      if (s) this._dropSession(s, "disconnected", true);
+      this.devices.delete(id);
+      this._saveDevices();
+      this._emitDevices();
+      return true;
+    }
+
+    // ---- connecting to the devices we know ------------------------------------------------------
+
+    _redialAll() {
+      if (this.stopped) return;
+      for (const d of this.devices.values()) if (!d.stale) this._dialDevice(d).catch(noop);
+    }
+
+    async _dialDevice(dev) {
+      if (this.stopped || this.sessions.has(dev.id) || this.dialing.has(dev.id) || dev.id === this.me.id) return;
+      let peer;
+      try { peer = await this._dialer(); } catch { return; }
+      if (this.stopped || this.sessions.has(dev.id) || this.dialing.has(dev.id)) return;
+      const remoteId = DEVICE_PREFIX + dev.id;
+      const conn = peer.connect(remoteId, { serialization: "raw", reliable: true });
+      const gs = { role: "dialer", kind: "resume", dev, nonce: randomHex(16), done: false };
+      gs.onFail = () => {};
+      this.dialing.set(dev.id, conn);
+      this.failers.set(remoteId, err => this._handshakeFail(conn, err));
+      this._wire(conn, gs);
+    }
+
+    // ---- first-time linking with a code --------------------------------------------------------
+
+    /** Show a code on this device. The other device types it; this device then confirms. */
     host() {
-      this._closeEverything();
+      this.cancelPairing(true);
       return new Promise((resolve, reject) => {
         const attempt = tries => {
           const code = randomCode();
           let peer;
-          try { peer = this._newPeer(CODE_PREFIX + code); } catch (error) { this._fail(error, reject); return; }
-          this.peer = peer;
+          try { peer = this._newPeer(CODE_PREFIX + code); } catch (error) { this._pairFail(error.message); reject(error); return; }
+          this.hostPeer = peer;
           peer.on("open", () => {
-            this.code = code;
-            this._set("waiting", { code });
+            this.hostCode = code;
+            this.hostClaimed = false;
+            this._setPair("waiting", { code });
+            clearTimeout(this.hostTimer);
+            this.hostTimer = setTimeout(() => {
+              if (this.hostPeer === peer && !this.hostClaimed) { this.cancelPairing(true); this._setPair("error", { message: "The code expired. Press “Show my code” for a new one." }); }
+            }, CODE_LIFETIME_MS);
             resolve(code);
           });
-          peer.on("connection", conn => { conn.gsMode = "pair"; this._wire(conn); });
+          peer.on("connection", conn => this._wire(conn, { role: "listener", mode: "pair" }));
           peer.on("error", err => {
-            if (err.type === "unavailable-id" && tries < 5) { peer.destroy(); attempt(tries + 1); return; }
-            this._fail(err, reject);
+            if (this.hostPeer !== peer) return;
+            if (err.type === "unavailable-id" && tries < 5) { try { peer.destroy(); } catch {} attempt(tries + 1); return; }
+            this._pairFail(this._explain(err)); reject(new Error("pairing failed"));
           });
-          peer.on("disconnected", () => { if (this.state === "waiting") this._fail({ type: "network" }); });
+          peer.on("disconnected", () => { if (this.hostPeer === peer && !this.hostClaimed) { try { peer.reconnect(); } catch {} } });
         };
         attempt(0);
       });
     }
 
-    /** Enter the code shown on the other device. Resolves when connected. */
-    join(code) {
-      this._closeEverything();
+    /** Type the code shown on the other device. */
+    async join(code) {
+      this.cancelPairing(true);
       code = String(code || "").replace(/\D/g, "");
-      return new Promise((resolve, reject) => {
-        if (code.length !== 6) { this._fail({ message: "The code has 6 digits." }, reject); return; }
-        this.outKind = "pair";
-        this._set("connecting");
-        let peer;
-        try { peer = this._newPeer(); } catch (error) { this._fail(error, reject); return; }
-        this.peer = peer;
-        const timer = setTimeout(() => this._fail({ type: "timeout" }, reject), CONNECT_TIMEOUT_MS);
-        peer.on("open", () => {
-          const conn = peer.connect(CODE_PREFIX + code, { serialization: "raw", reliable: true });
-          conn.gsMode = "out-pair";
-          conn.gsDone = ok => { clearTimeout(timer); resolve(ok); };
-          conn.gsFail = err => { clearTimeout(timer); this._fail(err, reject); };
-          this._wire(conn);
-        });
-        peer.on("error", err => { clearTimeout(timer); this._fail(err, reject); });
-      });
+      if (code.length !== 6) { this._pairFail("The code has 6 digits."); throw new Error("code"); }
+      this._setPair("connecting");
+      let peer;
+      try { peer = await this._dialer(); } catch (e) { this._pairFail(this._explain({ type: "network" })); throw e; }
+      const remoteId = CODE_PREFIX + code;
+      const conn = peer.connect(remoteId, { serialization: "raw", reliable: true });
+      const gs = { role: "dialer", kind: "pair", done: false };
+      gs.onFail = err => this._pairFail(this._explain(err));
+      this.pairConn = conn;
+      this.failers.set(remoteId, err => this._handshakeFail(conn, err));
+      this._wire(conn, gs);
     }
 
-    _fail(err, reject) {
+    /** Stop showing a code / stop an attempt. `silent` = do not tell the page. */
+    cancelPairing(silent = false) {
+      clearTimeout(this.hostTimer);
+      clearTimeout(this.confirmTimer);
+      if (this.hostPeer) { try { this.hostPeer.destroy(); } catch {} this.hostPeer = null; }
+      if (this.pairConn) { try { this.pairConn.gs.done = true; this.pairConn.close(); } catch {} this.pairConn = null; }
+      if (this.waitingConfirm) { try { this._refuse(this.waitingConfirm, "denied"); } catch {} this.waitingConfirm = null; }
+      this.hostCode = null;
+      if (!silent && this.pairState !== "idle") this._setPair("idle", {});
+      else this.pairState = "idle";
+    }
+
+    _pairFail(message) {
+      this.cancelPairing(true);
+      this._setPair("error", { message });
+    }
+
+    _explain(err) {
       const type = err && err.type;
-      const message =
-        type === "peer-unavailable" ? "No device has that code. Check the code and try again."
+      return type === "peer-unavailable" ? "No device has that code. Check the code and try again."
         : type === "timeout" ? "Could not reach the other device. Check that both are online."
-        : type === "network" || type === "server-error" || type === "socket-error" || type === "socket-closed"
-          ? "Could not reach the connection server. Check your internet connection."
+        : type === "network" || type === "server-error" || type === "socket-error" || type === "socket-closed" ? "Could not reach the connection server. Check your internet connection."
         : (err && err.message) || "Could not connect.";
-      this._closeEverything();
-      this._set("error", { message });
-      if (reject) reject(new Error(message));
     }
 
-    // ---- one connection: hello / welcome check, then it becomes THE connection ----------------
+    // ---- one connection: handshake, then it becomes a session ---------------------------------
 
-    _wire(conn) {
+    _wire(conn, gs) {
+      conn.gs = gs;
+      gs.trusted = false;
       conn.on("open", () => {
-        if (conn.gsMode === "out-pair") this._rawSend(conn, { t: "hello", kind: "pair", deviceId: this.me.id, name: this.name });
-        else if (conn.gsMode === "out-resume") this._rawSend(conn, { t: "hello", kind: "resume", deviceId: this.me.id, secret: this.paired && this.paired.secret, name: this.name });
-        else {
-          // we are the listener: the other side must say hello soon
-          conn.gsTimer = setTimeout(() => { try { conn.close(); } catch {} }, HANDSHAKE_TIMEOUT_MS);
-        }
-        if (conn.gsMode && conn.gsMode.startsWith("out-")) {
-          conn.gsTimer = setTimeout(() => { if (!conn.gsTrusted && conn.gsFail) conn.gsFail({ type: "timeout" }); }, HANDSHAKE_TIMEOUT_MS);
+        gs.timer = setTimeout(() => {
+          if (gs.trusted) return;
+          if (gs.role === "dialer") this._handshakeFail(conn, { type: "timeout" });
+          else { try { conn.close(); } catch {} }
+        }, HANDSHAKE_TIMEOUT_MS);
+        if (gs.role === "dialer") {
+          if (gs.kind === "pair") this._raw(conn, { t: "hello", kind: "pair", deviceId: this.me.id, name: this.name });
+          else this._raw(conn, { t: "hello", kind: "resume", deviceId: this.me.id, name: this.name, nonce: gs.nonce });
         }
       });
       conn.on("data", data => this._connData(conn, data));
-      conn.on("close", () => { clearTimeout(conn.gsTimer); if (conn === this.conn) this._onClosed(); else if (!conn.gsTrusted && conn.gsFail && !conn.gsEnded) conn.gsFail({ type: "peer-unavailable" }); });
-      conn.on("error", err => { clearTimeout(conn.gsTimer); if (conn === this.conn) this._onClosed(); else if (!conn.gsTrusted && conn.gsFail && !conn.gsEnded) conn.gsFail(err); });
+      conn.on("close", () => this._connClosed(conn));
+      conn.on("error", err => this._connClosed(conn, err));
     }
 
-    _rawSend(conn, obj) { try { conn.dataChannel.send(JSON.stringify(obj)); } catch {} }
+    _raw(conn, obj) { try { conn.dataChannel.send(JSON.stringify(obj)); } catch {} }
+    _refuse(conn, reason) {
+      this._raw(conn, { t: "refuse", reason });
+      conn.gs.ended = true;
+      setTimeout(() => { try { conn.close(); } catch {} }, 300);
+    }
 
-    _connData(conn, data) {
-      if (conn.gsTrusted) { if (conn === this.conn) this._onData(data); return; }
+    _connClosed(conn, err) {
+      const gs = conn.gs;
+      if (!gs) return;
+      clearTimeout(gs.timer);
+      if (gs.trusted) {
+        const s = gs.session;
+        if (s && this.sessions.get(s.dev.id) === s) this._dropSession(s, "disconnected", false);
+      } else if (gs.role === "dialer" && !gs.done && !gs.ended) {
+        this._handshakeFail(conn, err && err.type ? err : { type: "peer-unavailable" });
+      }
+    }
+
+    _handshakeFail(conn, err) {
+      const gs = conn.gs;
+      if (!gs || gs.done || gs.trusted) return;
+      gs.done = true;
+      clearTimeout(gs.timer);
+      try { conn.close(); } catch {}
+      if (gs.dev) { if (this.dialing.get(gs.dev.id) === conn) this.dialing.delete(gs.dev.id); this.failers.delete(DEVICE_PREFIX + gs.dev.id); }
+      if (this.pairConn === conn) { this.pairConn = null; }
+      if (gs.onFail) gs.onFail(err);
+    }
+
+    async _connData(conn, data) {
+      const gs = conn.gs;
+      if (gs.trusted) { if (gs.session && this.sessions.get(gs.session.dev.id) === gs.session) this._onData(gs.session, data); return; }
       if (typeof data !== "string") return;
       let m; try { m = JSON.parse(data); } catch { return; }
+      if (gs.busy) return;                       // one handshake step at a time
+      gs.busy = true;
+      try { await this._handshake(conn, gs, m); } catch (e) { console.error(e); try { conn.close(); } catch {} } finally { gs.busy = false; }
+    }
 
-      // ---- we are the listener -------------------------------------------------------------
-      if (m.t === "hello" && (conn.gsMode === "pair" || conn.gsMode === "resume")) {
-        clearTimeout(conn.gsTimer);
-        const refuse = reason => { this._rawSend(conn, { t: "refuse", reason }); conn.gsEnded = true; setTimeout(() => { try { conn.close(); } catch {} }, 300); };
-        if (m.kind !== conn.gsMode) { refuse("wrong"); return; }
-
-        if (m.kind === "resume") {
-          if (!this.paired || m.deviceId !== this.paired.id || !m.secret || m.secret !== this.paired.secret) { refuse("unknown"); return; }
-          const racing = this.state === "connecting" && this.outKind === "resume";
-          if (this.state === "connected" || (this.state !== "idle" && this.state !== "error" && !racing)) { refuse("busy"); return; }
-          // Both devices dialled each other at the same moment: the smaller id wins.
-          if (racing) { if (m.deviceId < this.me.id) this._closeOutgoing(); else { refuse("busy"); return; } }
-          this._rawSend(conn, { t: "welcome", kind: "resume", deviceId: this.me.id, name: this.name });
-          this.paired.name = m.name || this.paired.name; store.set(KEY_PAIR, this.paired);
-          this._become(conn);
+    async _handshake(conn, gs, m) {
+      // ---------------- we are the listener ----------------
+      if (gs.role === "listener") {
+        if (m.t === "hello" && gs.mode === "pair" && m.kind === "pair") { this._onPairHello(conn, gs, m); return; }
+        if (m.t === "hello" && gs.mode === "device" && m.kind === "resume") {
+          if (gs.stage) return;
+          clearTimeout(gs.timer);
+          const dev = this.devices.get(m.deviceId);
+          if (!dev || dev.stale || typeof m.nonce !== "string" || m.nonce.length < 16) { this._refuse(conn, "unknown"); return; }
+          const racing = this.dialing.get(dev.id);
+          if (racing) { if (dev.id < this.me.id) { racing.gs.done = true; this.dialing.delete(dev.id); try { racing.close(); } catch {} } else { this._refuse(conn, "busy"); return; } }
+          gs.stage = "challenged"; gs.dev = dev; gs.nonceA = m.nonce; gs.nonceB = randomHex(16);
+          gs.timer = setTimeout(() => { try { conn.close(); } catch {} }, HANDSHAKE_TIMEOUT_MS);
+          const proof = await hmac(dev.secret, `L|${gs.nonceA}|${gs.nonceB}|${this.me.id}|${dev.id}`);
+          this._raw(conn, { t: "challenge", nonce: gs.nonceB, proof, name: this.name });
           return;
         }
+        if (m.t === "auth" && gs.stage === "challenged") {
+          const dev = gs.dev;
+          const expect = await hmac(dev.secret, `D|${gs.nonceB}|${gs.nonceA}|${dev.id}|${this.me.id}`);
+          if (!sameText(expect, m.proof)) { this._refuse(conn, "unknown"); return; }
+          this._raw(conn, { t: "welcome", kind: "resume", deviceId: this.me.id, name: this.name });
+          this._become(conn, dev);
+          return;
+        }
+        return;
+      }
 
-        // first-time pairing through the code
-        if (this.state !== "waiting") { refuse("busy"); return; }
-        if (m.deviceId === this.me.id) {
-          // The same browser profile on both sides (e.g. two tabs of one computer): fine for a
-          // test, but there is nothing to remember.
-          this._rawSend(conn, { t: "welcome", kind: "pair", deviceId: this.me.id, name: this.name, secret: "" });
+      // ---------------- we are the dialler ----------------
+      if (m.t === "refuse") {
+        gs.ended = true;
+        const reason = m.reason;
+        if (gs.kind === "pair") {
+          this._handshakeFail(conn, { message: reason === "denied" ? "The other device did not allow the connection." : reason === "used" ? "That code was already used. Ask for a new one." : reason === "same" ? "That is this same browser profile. Use a different device or browser profile." : "The other device refused the connection." });
+        } else if (reason === "unknown") {
+          gs.dev.stale = true; this._saveDevices();
+          this._event("refused", gs.dev, `${gs.dev.name} no longer recognises this device.`);
+          this._handshakeFail(conn, { message: "unknown" }); this._emitDevices();
+        } else { this._handshakeFail(conn, { message: "busy" }); }
+        return;
+      }
+      if (gs.kind === "resume" && m.t === "challenge") {
+        const dev = gs.dev;
+        const expect = await hmac(dev.secret, `L|${gs.nonce}|${m.nonce}|${dev.id}|${this.me.id}`);
+        if (!sameText(expect, m.proof)) { this._handshakeFail(conn, { message: "impostor" }); return; }   // whoever answered does not know the secret
+        if (m.name) { const n = cleanLabel(m.name); if (n && n !== dev.name) { dev.name = n; this._saveDevices(); } }
+        const proof = await hmac(dev.secret, `D|${m.nonce}|${gs.nonce}|${this.me.id}|${dev.id}`);
+        this._raw(conn, { t: "auth", proof });
+        return;
+      }
+      if (m.t === "welcome") {
+        if (gs.kind === "pair") {
+          if (!m.secret || !m.deviceId || m.deviceId === this.me.id) { this._handshakeFail(conn, { message: "The other device sent an invalid reply." }); return; }
+          const old = this.devices.get(m.deviceId);
+          const dev = { id: m.deviceId, name: cleanLabel(m.name) || "Other device", secret: m.secret, auto: old && old.auto !== undefined ? old.auto : null, source: "code" };
+          this.devices.set(dev.id, dev); this._saveDevices();
+          this.pairConn = null;
+          this._become(conn, dev);
+          this._setPair("idle", { paired: dev.name });
+          this._event("paired", dev);
         } else {
-          const secret = randomHex(24);
-          this._rawSend(conn, { t: "welcome", kind: "pair", deviceId: this.me.id, name: this.name, secret });
-          this.paired = { id: m.deviceId, name: m.name || "other device", secret };
-          store.set(KEY_PAIR, this.paired);
+          this._become(conn, gs.dev);
         }
-        this._become(conn);
-        return;
-      }
-
-      // ---- we are the one who dialled ------------------------------------------------------
-      if (m.t === "welcome" && conn.gsMode && conn.gsMode.startsWith("out-")) {
-        clearTimeout(conn.gsTimer);
-        if (m.kind === "pair" && m.secret && m.deviceId !== this.me.id) {
-          this.paired = { id: m.deviceId, name: m.name || "other device", secret: m.secret };
-          store.set(KEY_PAIR, this.paired);
-        } else if (m.kind === "resume" && this.paired) {
-          this.paired.name = m.name || this.paired.name; store.set(KEY_PAIR, this.paired);
-        }
-        this._become(conn);
-        if (conn.gsDone) conn.gsDone(true);
-        return;
-      }
-      if (m.t === "refuse" && conn.gsMode && conn.gsMode.startsWith("out-")) {
-        clearTimeout(conn.gsTimer);
-        conn.gsEnded = true;
-        if (m.reason === "busy" && conn.gsMode === "out-resume") {
-          // The other device is dialling us at the same time (or already connected to someone):
-          // stay quiet and wait for its connection to arrive.
-          if (conn.gsDone) conn.gsDone(false);
-          this._closeOutgoing();
-          if (this.state === "connecting") this._set("idle", { offline: false });
-        } else if (m.reason === "unknown" && conn.gsMode === "out-resume") {
-          const name = this.paired ? this.paired.name : "other device";
-          this.forget();
-          if (conn.gsFail) conn.gsFail({ message: `Your ${name} no longer remembers this device. Pair them again with a code.` });
-        } else if (conn.gsFail) conn.gsFail({ message: "The other device refused the connection." });
       }
     }
 
-    _become(conn) {
-      conn.gsTrusted = true;
-      clearTimeout(conn.gsTimer);
-      this.conn = conn;
-      this.outKind = null;
+    // We are the host and someone typed our code.
+    _onPairHello(conn, gs, m) {
+      clearTimeout(gs.timer);
+      if (!m.deviceId || typeof m.deviceId !== "string") { this._refuse(conn, "wrong"); return; }
+      if (m.deviceId === this.me.id) { this._refuse(conn, "same"); return; }
+      if (this.pairState !== "waiting" || this.hostClaimed) { this._refuse(conn, "used"); return; }
+      this.hostClaimed = true;
+      const name = cleanLabel(m.name) || "Other device";
+      this.waitingConfirm = conn;
+      gs.pending = true;
+      const finish = ok => {
+        clearTimeout(this.confirmTimer);
+        if (this.waitingConfirm !== conn) return;
+        this.waitingConfirm = null;
+        if (!ok) { this._refuse(conn, "denied"); this.cancelPairing(true); this._setPair("idle", {}); return; }
+        const secret = randomHex(24);
+        const old = this.devices.get(m.deviceId);
+        const dev = { id: m.deviceId, name, secret, auto: old && old.auto !== undefined ? old.auto : null, source: "code" };
+        this.devices.set(dev.id, dev); this._saveDevices();
+        this._raw(conn, { t: "welcome", kind: "pair", deviceId: this.me.id, name: this.name, secret });
+        this._become(conn, dev);
+        // The code's peer carries this very connection, so it lives until the connection ends.
+        const peer = this.hostPeer; this.hostPeer = null; this.hostCode = null; clearTimeout(this.hostTimer);
+        if (peer && conn.gs.session) conn.gs.session.carrier = peer;
+        this._setPair("idle", { paired: dev.name });
+        this._event("paired", dev);
+      };
+      this.confirmTimer = setTimeout(() => finish(false), CONFIRM_TIMEOUT_MS);
+      this._setPair("confirm", { name, allow: () => finish(true), deny: () => finish(false) });
+    }
+
+    _become(conn, dev) {
+      const gs = conn.gs;
+      gs.trusted = true;
+      gs.done = true;
+      clearTimeout(gs.timer);
+      if (this.dialing.get(dev.id) === conn) this.dialing.delete(dev.id);
+      this.failers.delete(DEVICE_PREFIX + dev.id);
+      dev.stale = false;
+      const old = this.sessions.get(dev.id);
+      if (old && old.conn !== conn) this._dropSession(old, "replaced", true);
+      const s = { conn, dev, outgoing: null, incoming: null, lastSeen: Date.now() };
+      gs.session = s;
+      s.pinger = setInterval(() => {
+        if (!this._live(s)) { clearInterval(s.pinger); return; }
+        if (Date.now() - s.lastSeen > DEAD_MS) { this._dropSession(s, "disconnected", true); return; }
+        try { this._send(s, { t: "ping" }); } catch {}
+      }, PING_MS);
+      this.sessions.set(dev.id, s);
       const dc = conn.dataChannel;
       if (dc) { dc.binaryType = "arraybuffer"; dc.bufferedAmountLowThreshold = BUFFER_LOW; }
-      this._set("connected");
+      this._saveDevices();
+      this._emitDevices();
+      this._event("connected", dev);
     }
 
-    _onClosed() {
-      if (this.state === "idle" || this.state === "error") return;
-      const hadTransfer = !!(this.outgoing || this.incoming);
-      this._stopTransfers("disconnected");
-      this.conn = null;
-      if (this.peer) { try { this.peer.destroy(); } catch {} this.peer = null; }
-      this.code = null;
-      this._set("idle", { message: hadTransfer ? "The other device disconnected during the transfer." : "The other device disconnected." });
+    _dropSession(s, reason, closeConn) {
+      if (this.sessions.get(s.dev.id) === s) this.sessions.delete(s.dev.id);
+      clearInterval(s.pinger);
+      this._stopTransfers(s, reason);
+      if (closeConn) { s.conn.gs.ended = true; try { s.conn.close(); } catch {} }
+      if (s.carrier) { const c = s.carrier; s.carrier = null; setTimeout(() => { try { c.destroy(); } catch {} }, 300); }
+      this._emitDevices();
+      if (reason !== "replaced") this._event("disconnected", s.dev);
     }
 
-    _closeOutgoing() {
-      if (this.peer) { try { this.peer.destroy(); } catch {} this.peer = null; }
-      this.outKind = null;
-    }
-
-    // Stop whatever connection or attempt exists, without telling the page.
-    _closeEverything() {
-      this._stopTransfers("disconnected");
-      if (this.conn) { const c = this.conn; this.conn = null; c.gsEnded = true; try { c.close(); } catch {} }
-      this._closeOutgoing();
-      this.code = null;
-      this.state = "idle";
-    }
-
-    /** Close the connection. `silent` = do not tell the page. The remembered device stays remembered. */
-    disconnect(silent = false) {
-      const was = this.state;
-      this._closeEverything();
-      if (!silent && was !== "idle") this._set("idle", {});
-    }
+    _live(s) { return this.sessions.get(s.dev.id) === s; }
+    _send(s, obj) { s.conn.dataChannel.send(JSON.stringify(obj)); }
 
     // ---- sending -----------------------------------------------------------------------------
 
-    _send(obj) { this.conn.dataChannel.send(JSON.stringify(obj)); }
-
-    /**
-     * Offer a File to the other device and, once they catch it, send it. Progress and the result
-     * are reported through onSendState / onProgress; this never throws after it has started.
-     */
-    sendFile(file) {
-      // Problems we can see right now are thrown straight away (the page catches them).
-      if (!this.connected) throw new Error("No device connected.");
-      if (this.outgoing) throw new Error("Another file is still being sent.");
-      return this._sendFile(file);
+    /** Offer a File to a device (default: the chosen one) and send it once they accept. */
+    sendFile(file, toId) {
+      const id = toId || this.target();
+      const s = id && this.sessions.get(id);
+      if (!s) throw new Error("No device connected.");
+      if (s.outgoing) throw new Error("Another file is still being sent.");
+      return this._sendFile(s, file);
     }
 
-    async _sendFile(file) {
-      const id = randomId();
+    async _sendFile(s, file) {
+      const id = randomHex(4);
       const out = { id, file, ack: null, timer: null };
-      this.outgoing = out;
-      const state = (s, detail) => { try { this.cb.sendState(id, s, detail); } catch (e) { console.error(e); } };
-      const alive = () => this.outgoing === out;
+      s.outgoing = out;
+      const state = (st, detail) => { try { this.cb.sendState(id, st, detail, { id: s.dev.id, name: s.dev.name }); } catch (e) { console.error(e); } };
+      const alive = () => s.outgoing === out;
 
       try {
-        // 1) ask, and wait for the other device to catch it
         const answer = new Promise((resolve, reject) => {
           out.resolveAnswer = resolve;
           out.rejectAnswer = reject;
           out.timer = setTimeout(() => reject(Object.assign(new Error("not caught in time"), { kind: "expired" })), OFFER_TIMEOUT_MS);
         });
         answer.catch(noop);
-        this._send({ t: "offer", id, name: cleanName(file.name), size: file.size, mime: file.type || "" });
+        this._send(s, { t: "offer", id, name: cleanName(file.name), size: file.size, mime: file.type || "" });
         state("waiting");
         await answer;
         clearTimeout(out.timer);
 
-        // 2) send the pieces
         const ack = new Promise((resolve, reject) => { out.ack = { resolve, reject }; });
         ack.catch(noop);
         state("sending");
-        const dc = this.conn.dataChannel;
-        const piece = Math.min(CHUNK, (this.conn.peerConnection && this.conn.peerConnection.sctp && this.conn.peerConnection.sctp.maxMessageSize) || CHUNK);
+        const dc = s.conn.dataChannel;
+        const piece = Math.min(CHUNK, (s.conn.peerConnection && s.conn.peerConnection.sctp && s.conn.peerConnection.sctp.maxMessageSize) || CHUNK);
         let sent = 0;
         this.cb.progress("send", id, 0, file.size);
         for (let offset = 0; offset < file.size; offset += READ_BLOCK) {
@@ -453,19 +684,15 @@
           }
         }
         if (!alive()) throw Object.assign(new Error("cancelled"), { kind: "cancelled" });
-        this._send({ t: "done", id });
+        this._send(s, { t: "done", id });
 
-        // 3) wait for "got it"
         await ack;
         this.cb.progress("send", id, file.size, file.size);
         state("delivered");
       } catch (error) {
         const kind = error.kind;
-        if (out.ended === "disconnected") {
-          state("failed", "the other device disconnected");
-          return;
-        }
-        if (this.connected && kind !== "declined" && kind !== "cancelled-by-peer") { try { this._send({ t: "cancel", id }); } catch {} }
+        if (out.ended === "disconnected") { state("failed", "the other device disconnected"); return; }
+        if (this._live(s) && kind !== "declined" && kind !== "cancelled-by-peer") { try { this._send(s, { t: "cancel", id }); } catch {} }
         if (kind === "declined") state("declined", error.message);
         else if (kind === "expired") state("expired");
         else if (kind === "cancelled") state("failed", "cancelled");
@@ -474,7 +701,7 @@
         else state("failed", error.message);
       } finally {
         clearTimeout(out.timer);
-        if (this.outgoing === out) this.outgoing = null;
+        if (s.outgoing === out) { s.outgoing = null; this._emitDevices(); }   // lets the page enable "Send now" again
       }
     }
 
@@ -486,98 +713,116 @@
       });
     }
 
-    /** Stop the file that is being sent (a no-op if nothing is). */
+    /** Stop the file being sent (to any device). */
     cancelSend() {
-      const out = this.outgoing;
-      if (!out) return;
-      this.outgoing = null;
-      if (this.connected) { try { this._send({ t: "cancel", id: out.id }); } catch {} }
-      clearTimeout(out.timer);
-      if (out.rejectAnswer) out.rejectAnswer(Object.assign(new Error("cancelled"), { kind: "cancelled" }));
-      if (out.ack) out.ack.reject(Object.assign(new Error("cancelled"), { kind: "cancelled" }));
+      for (const s of this.sessions.values()) {
+        const out = s.outgoing;
+        if (!out) continue;
+        s.outgoing = null;
+        try { this._send(s, { t: "cancel", id: out.id }); } catch {}
+        clearTimeout(out.timer);
+        const error = Object.assign(new Error("cancelled"), { kind: "cancelled" });
+        if (out.rejectAnswer) out.rejectAnswer(error);
+        if (out.ack) out.ack.reject(error);
+      }
     }
 
     // ---- receiving ---------------------------------------------------------------------------
 
-    /** Say yes to the offered file; it starts arriving straight away. Returns false if the offer is gone. */
+    _sessionOfOffer(id) {
+      for (const s of this.sessions.values()) if (s.incoming && s.incoming.id === id) return s;
+      return null;
+    }
+
+    /** Say yes to an offered file; it starts arriving straight away. Returns false if the offer is gone. */
     accept(id) {
-      const inc = this.incoming;
-      if (!inc || inc.id !== id || inc.accepted || !this.connected) return false;
+      const s = this._sessionOfOffer(id);
+      const inc = s && s.incoming;
+      if (!inc || inc.accepted) return false;
       inc.accepted = true;
-      try { this._send({ t: "accept", id }); } catch { return false; }
+      try { this._send(s, { t: "accept", id }); } catch { return false; }
       this.cb.progress("receive", id, 0, inc.size);
       return true;
     }
 
     /** Say no (or stop receiving). */
     reject(id) {
-      const inc = this.incoming;
-      if (!inc || inc.id !== id) return;
-      this.incoming = null;
-      if (this.connected) { try { this._send(inc.accepted ? { t: "cancel", id } : { t: "decline", id, reason: "declined" }); } catch {} }
+      const s = this._sessionOfOffer(id);
+      const inc = s && s.incoming;
+      if (!inc) return;
+      s.incoming = null;
+      try { this._send(s, inc.accepted ? { t: "cancel", id } : { t: "decline", id, reason: "declined" }); } catch {}
     }
 
-    _onData(data) {
+    _onData(s, data) {
+      s.lastSeen = Date.now();
       if (typeof data === "string") {
         let msg; try { msg = JSON.parse(data); } catch { return; }
-        this._onMessage(msg);
+        this._onMessage(s, msg);
         return;
       }
-      const inc = this.incoming;                      // a piece of the file
+      const inc = s.incoming;
       if (!inc || !inc.accepted) return;
       inc.chunks.push(data);
       inc.got += data.byteLength;
       this.cb.progress("receive", inc.id, inc.got, inc.size);
     }
 
-    _onMessage(msg) {
+    _anyIncoming() { for (const s of this.sessions.values()) if (s.incoming) return true; return false; }
+
+    _onMessage(s, msg) {
       switch (msg.t) {
+        case "name": {
+          const n = cleanLabel(msg.name);
+          if (n && n !== s.dev.name && s.dev.source !== "account") { s.dev.name = n; this._saveDevices(); this._emitDevices(); }
+          break;
+        }
         case "offer": {
-          if (this.incoming || this.outgoing) {
-            try { this._send({ t: "decline", id: msg.id, reason: "busy" }); } catch {}
+          if (s.incoming || s.outgoing || this._anyIncoming()) {
+            try { this._send(s, { t: "decline", id: msg.id, reason: "busy" }); } catch {}
             return;
           }
-          this.incoming = { id: msg.id, name: cleanName(msg.name), size: Number(msg.size) || 0, mime: msg.mime || "",
-                            chunks: [], got: 0, accepted: false };
-          this.cb.offer({ id: msg.id, name: this.incoming.name, size: this.incoming.size, mime: this.incoming.mime });
+          s.incoming = { id: msg.id, name: cleanName(msg.name), size: Number(msg.size) || 0, mime: msg.mime || "", chunks: [], got: 0, accepted: false };
+          const auto = s.dev.auto === true;
+          this.cb.offer({ id: msg.id, from: { id: s.dev.id, name: s.dev.name }, name: s.incoming.name, size: s.incoming.size, mime: s.incoming.mime, auto });
+          if (auto) this.accept(msg.id);
           break;
         }
         case "accept":
-          if (this.outgoing && this.outgoing.id === msg.id && this.outgoing.resolveAnswer) this.outgoing.resolveAnswer();
+          if (s.outgoing && s.outgoing.id === msg.id && s.outgoing.resolveAnswer) s.outgoing.resolveAnswer();
           break;
         case "decline":
-          if (this.outgoing && this.outgoing.id === msg.id && this.outgoing.rejectAnswer) {
-            this.outgoing.rejectAnswer(Object.assign(
-              new Error(msg.reason === "busy" ? "the other device is busy with another file" : "declined"), { kind: "declined" }));
+          if (s.outgoing && s.outgoing.id === msg.id && s.outgoing.rejectAnswer) {
+            s.outgoing.rejectAnswer(Object.assign(new Error(msg.reason === "busy" ? "the other device is busy with another file" : "declined"), { kind: "declined" }));
           }
           break;
         case "done": {
-          const inc = this.incoming;
+          const inc = s.incoming;
           if (!inc || inc.id !== msg.id) return;
           const ok = inc.got === inc.size;
-          try { this._send({ t: "ack", id: inc.id, ok, bytes: inc.got }); } catch {}
-          this.incoming = null;
+          try { this._send(s, { t: "ack", id: inc.id, ok, bytes: inc.got }); } catch {}
+          s.incoming = null;
           if (ok) {
             this.cb.progress("receive", inc.id, inc.size, inc.size);
-            this.cb.received({ id: inc.id, name: inc.name, size: inc.size }, new Blob(inc.chunks, { type: inc.mime }));
+            this.cb.received({ id: inc.id, name: inc.name, size: inc.size, from: { id: s.dev.id, name: s.dev.name } }, new Blob(inc.chunks, { type: inc.mime }));
           } else {
             this.cb.offerGone(inc.id, "the file arrived incomplete");
           }
           break;
         }
         case "ack":
-          if (this.outgoing && this.outgoing.id === msg.id && this.outgoing.ack) {
-            if (msg.ok) this.outgoing.ack.resolve(msg);
-            else this.outgoing.ack.reject(new Error("The other device did not get the whole file."));
+          if (s.outgoing && s.outgoing.id === msg.id && s.outgoing.ack) {
+            if (msg.ok) s.outgoing.ack.resolve(msg);
+            else s.outgoing.ack.reject(new Error("The other device did not get the whole file."));
           }
           break;
         case "cancel": {
-          if (this.incoming && this.incoming.id === msg.id) {
-            const inc = this.incoming; this.incoming = null;
+          if (s.incoming && s.incoming.id === msg.id) {
+            const inc = s.incoming; s.incoming = null;
             this.cb.offerGone(inc.id, "cancelled");
           }
-          if (this.outgoing && this.outgoing.id === msg.id) {
-            const out = this.outgoing;
+          if (s.outgoing && s.outgoing.id === msg.id) {
+            const out = s.outgoing;
             const error = Object.assign(new Error("cancelled"), { kind: "cancelled-by-peer" });
             clearTimeout(out.timer);
             if (out.rejectAnswer) out.rejectAnswer(error);
@@ -588,20 +833,19 @@
       }
     }
 
-    // The connection is gone (or being closed): end whatever was in progress.
-    _stopTransfers(reason) {
-      const out = this.outgoing;
+    _stopTransfers(s, reason) {
+      const out = s.outgoing;
       if (out) {
-        this.outgoing = null;
-        out.ended = "disconnected";                // sendFile() reports this as "failed" by itself
+        s.outgoing = null;
+        out.ended = "disconnected";
         clearTimeout(out.timer);
         const error = Object.assign(new Error("the other device disconnected"), { kind: "cancelled-by-peer" });
         if (out.rejectAnswer) out.rejectAnswer(error);
         if (out.ack) out.ack.reject(error);
       }
-      const inc = this.incoming;
+      const inc = s.incoming;
       if (inc) {
-        this.incoming = null;
+        s.incoming = null;
         try { this.cb.offerGone(inc.id, reason); } catch {}
       }
     }

@@ -72,11 +72,9 @@ const incomingMeta = document.getElementById("incoming-meta");
 const incomingActions = document.getElementById("incoming-actions");
 const declineButton = document.getElementById("decline-incoming");
 const demoBox = document.getElementById("demo");
-const connectBox = document.getElementById("connect");
+const connectError = document.getElementById("connect-error");
 const connectIdle = document.getElementById("connect-idle");
 const connectWaiting = document.getElementById("connect-waiting");
-const connectConnected = document.getElementById("connect-connected");
-const connectError = document.getElementById("connect-error");
 const connectWaitLabel = document.getElementById("connect-wait-label");
 const connectWaitText = document.getElementById("connect-wait-text");
 const codeDisplay = document.getElementById("code-display");
@@ -84,16 +82,24 @@ const hostButton = document.getElementById("host-btn");
 const joinForm = document.getElementById("join-form");
 const joinInput = document.getElementById("join-input");
 const cancelConnect = document.getElementById("cancel-connect");
-const disconnectButton = document.getElementById("disconnect-btn");
-const pairedBox = document.getElementById("paired-box");
-const pairBox = document.getElementById("pair-box");
-const pairedTitle = document.getElementById("paired-title");
-const pairedSub = document.getElementById("paired-sub");
-const reconnectButton = document.getElementById("reconnect-btn");
-const forgetButton = document.getElementById("forget-btn");
-const anotherButton = document.getElementById("another-btn");
-const pairBackButton = document.getElementById("pair-back");
-const connectedTitle = document.getElementById("connected-title");
+const addDeviceButton = document.getElementById("add-device");
+const pairPanel = document.getElementById("pair-panel");
+const pairClose = document.getElementById("pair-close");
+const pairConfirm = document.getElementById("pair-confirm");
+const confirmTitle = document.getElementById("confirm-title");
+const confirmAllow = document.getElementById("confirm-allow");
+const confirmDeny = document.getElementById("confirm-deny");
+const listMine = document.getElementById("list-mine");
+const listOther = document.getElementById("list-other");
+const emptyMine = document.getElementById("empty-mine");
+const emptyOther = document.getElementById("empty-other");
+const meName = document.getElementById("me-name");
+const renameButton = document.getElementById("rename-btn");
+const renameForm = document.getElementById("rename-form");
+const renameInput = document.getElementById("rename-input");
+const sendTo = document.getElementById("send-to");
+const sendToLabel = document.getElementById("send-to-label");
+const sendToChips = document.getElementById("send-to-chips");
 const sendNowButton = document.getElementById("send-now");
 const sendProgress = document.getElementById("send-progress");
 const sendProgressText = document.getElementById("send-progress-text");
@@ -201,6 +207,7 @@ let incoming = null;       // { name, size }         a file waiting to be caught
 let incomingTimer = null;
 let receiving = null;     // { id, name, size }       a file that is arriving right now
 let outgoingName = "";
+let outgoingTo = "";
 let lastProgressAt = 0;
 let bannerTimer = null;
 let throwCount = 0;
@@ -218,11 +225,37 @@ const SIGNAL = (() => {
 
 const link = new GestureLink({
   signal: SIGNAL,
-  onStatus: (state, info) => renderConnect(state, info),
+  onDevices: list => renderDevices(list),
+  onPairing: (state, info) => renderPairing(state, info),
+  onEvent: event => {
+    const who = event.device ? event.device.name : "device";
+    if (event.type === "connected") { log(`${who} is online`); }
+    else if (event.type === "disconnected") {
+      log(`${who} went offline`);
+      receiving = null; hideProgress(recvProgress); hideProgress(sendProgress);
+      renderIncoming();
+    }
+    else if (event.type === "paired") { showBanner(`Linked with ${who} ✓`, "ok", 2200); log(`Linked with ${who}`); }
+    else if (event.type === "refused" && event.message) log(event.message);
+    updateCoach();
+  },
   onOffer: offer => {
-    setIncoming({ ...offer }, 60000);
-    showBanner(`Incoming: ${offer.name}`, "info", 2200);
-    log(`${offer.name} is incoming (${fmtSize(offer.size)})`);
+    const from = offer.from ? offer.from.name : "the other device";
+    if (offer.auto) {
+      // A device you trust: the file starts arriving by itself, nothing to press.
+      receiving = { id: offer.id, name: offer.name, size: offer.size, from };
+      renderIncoming();
+      recvProgress.hidden = false; recvProgress.dataset.done = "false";
+      recvProgressText.textContent = "Starting…";
+      recvProgressFill.style.width = "0%";
+      showBanner(`Receiving from ${from}: ${offer.name}`, "info", 2200);
+      log(`${offer.name} from ${from} is arriving (${fmtSize(offer.size)})`);
+      updateCoach();
+      return;
+    }
+    setIncoming({ ...offer, from }, 60000);
+    showBanner(`${from} wants to send: ${offer.name}`, "info", 2600);
+    log(`${offer.name} from ${from} is incoming (${fmtSize(offer.size)})`);
   },
   onOfferGone: (id, reason) => {
     if (incoming && incoming.id === id) {
@@ -257,14 +290,14 @@ const link = new GestureLink({
     showProgressDone(recvProgress, recvProgressText, recvProgressFill, "Saved to your Downloads folder");
     renderIncoming();
     showBanner(`Received ✓  ${offer.name}`, "ok", 2600);
-    log(`Received ${offer.name} (${fmtSize(offer.size)}), saved to Downloads`);
+    log(`Received ${offer.name}${offer.from ? " from " + offer.from.name : ""} (${fmtSize(offer.size)}), saved to Downloads`);
     updateCoach();
   },
   onSendState: (id, state, detail) => {
     switch (state) {
       case "waiting":
         sendProgress.hidden = false; sendProgress.dataset.done = "false";
-        sendProgressText.textContent = `Waiting for the other device to catch ${outgoingName}…`;
+        sendProgressText.textContent = `Waiting for ${outgoingTo || "the other device"} to accept ${outgoingName}…`;
         sendProgressFill.style.width = "0%";
         break;
       case "sending":
@@ -299,8 +332,8 @@ const link = new GestureLink({
 function onThrow(file, direction) {
   const arrow = direction ? ARROWS[direction] : "";       // no direction = the "Send now" button
   if (!link.connected) {
-    showBanner("Not connected: pair a device first", "warn", 2800);
-    log(`Not sent: no device connected (${file.name})`);
+    showBanner("No device is online: add one first", "warn", 2800);
+    log(`Not sent: no device online (${file.name})`);
     return;
   }
   if (link.outgoing) {
@@ -308,10 +341,13 @@ function onThrow(file, direction) {
     return;
   }
   try {
+    const toId = link.target();
+    const to = (link.list().find(d => d.id === toId) || {}).label || "";
     outgoingName = file.name;
-    link.sendFile(file.file || makeSampleFile(file));
-    showBanner(`${direction ? "Thrown" : "Sending"} ${arrow}  ${file.name}`, "ok");
-    log(direction ? `Threw ${file.name} ${arrow}` : `Sending ${file.name}`);
+    outgoingTo = to;
+    link.sendFile(file.file || makeSampleFile(file), toId);
+    showBanner(`${direction ? "Thrown" : "Sending"} ${arrow}  ${file.name}${to ? " to " + to : ""}`, "ok");
+    log(direction ? `Threw ${file.name} ${arrow}${to ? " to " + to : ""}` : `Sending ${file.name}${to ? " to " + to : ""}`);
   } catch (error) {
     showBanner("Could not send", "warn");
     log(`Could not send ${file.name}: ${error.message}`);
@@ -346,71 +382,132 @@ function showProgressDone(box, text, fill, message) {
   setTimeout(() => { if (box.dataset.done === "true") box.hidden = true; }, 5000);
 }
 
-// ---- Connect card -------------------------------------------------------------------------
-let lastLinkState = "idle";
+// ---- My devices -----------------------------------------------------------------------------
 function showConnectError(message) {
   connectError.textContent = message || "";
   connectError.hidden = !message;
 }
 
-let showPair = false;          // the user chose "Link a different device"
-let lastConnect = { state: "idle", info: {} };
+let devices = [];
+let pairOpen = false;          // the "Add a device" panel is open
+let pairingState = "idle";
 
-function renderConnect(state, info = {}) {
-  lastConnect = { state, info };
-  const connected = state === "connected";
-  const paired = info.paired || null;
-  const idleish = state === "idle" || state === "error";
-  if (!paired) showPair = false;
-  connectBox.dataset.state = connected ? "connected" : "idle";
-  connectIdle.hidden = !idleish;
-  pairedBox.hidden = !(idleish && paired && !showPair);
-  pairBox.hidden = !(idleish && (!paired || showPair));
-  pairBackButton.hidden = !(paired && showPair);
-  if (paired) {
-    pairedTitle.textContent = `Your ${paired.name}`;
-    pairedSub.textContent = info.offline
-      ? "It is not open right now. Open GestureShare on it and they connect by themselves."
-      : "Remembered. They connect by themselves when GestureShare is open on both.";
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function smallButton(text, handler, cls = "link-button") {
+  const b = el("button", cls, text);
+  b.type = "button";
+  b.addEventListener("click", handler);
+  return b;
+}
+
+function deviceRow(d, mine) {
+  const li = el("li", "device");
+  li.dataset.online = String(d.online);
+  const text = el("span", "d-text");
+  text.append(el("b", "", d.label));
+  const where = d.source === "account" ? " · your Chrome account" : "";
+  text.append(el("span", "", d.stale ? "Not linked any more. Remove it and link it again."
+    : `${d.online ? "Online" : "Offline"}${where}`));
+  const actions = el("span", "d-actions");
+  if (!d.stale) {
+    if (mine) actions.append(smallButton("Ask me first", () => link.setAuto(d.id, false)));
+    else actions.append(smallButton("Add to My devices", () => link.setAuto(d.id, true), "chip-btn yes"));
   }
-  connectedTitle.textContent = paired ? `Connected to your ${paired.name}` : "Connected";
-  connectWaiting.hidden = !(state === "waiting" || state === "connecting");
-  connectConnected.hidden = !connected;
-  showConnectError(state === "error" ? info.message : "");
+  if (d.source !== "account") actions.append(smallButton("Remove", () => { link.remove(d.id); log(`Removed ${d.label}`); }));
+  li.append(el("span", "dot"), text, actions);
+  return li;
+}
 
-  if (state === "waiting") {
-    connectWaitLabel.textContent = "Your code";
-    codeDisplay.textContent = `${info.code.slice(0, 3)} ${info.code.slice(3)}`;
-    connectWaitText.textContent = "On the other device, open GestureShare and type this code. It connects by itself.";
-  } else if (state === "connecting") {
-    connectWaitLabel.textContent = info.reconnect && paired ? `Looking for your ${paired.name}…` : "Connecting…";
-    codeDisplay.textContent = "• • •";
-    connectWaitText.textContent = info.reconnect ? "GestureShare must be open on that device." : "Looking for the other device.";
-  }
-
-  if (connected && lastLinkState !== "connected") {
-    showBanner("Connected ✓", "ok", 1800);
-    log("Connected to the other device");
-  } else if (!connected && lastLinkState === "connected" && info.message) {
-    showBanner("Disconnected", "warn", 2200);
-    log(info.message);
-    receiving = null; hideProgress(recvProgress); hideProgress(sendProgress);
-    renderIncoming();
-  }
-  lastLinkState = state;
-
-  demoBox.hidden = connected;
+function renderDevices(list) {
+  devices = list;
+  meName.textContent = link.name;
+  const online = list.filter(d => d.online);
+  const mine = list.filter(d => d.auto === true && !d.stale);
+  const other = list.filter(d => !(d.auto === true && !d.stale));
+  listMine.replaceChildren(...mine.map(d => deviceRow(d, true)));
+  listOther.replaceChildren(...other.map(d => deviceRow(d, false)));
+  emptyMine.hidden = mine.length > 0;
+  emptyOther.hidden = other.length > 0;
+  renderSendTo();
+  renderIncoming();
+  demoBox.hidden = online.length > 0;
   updateCoach();
 }
 
+// "Send to": nothing to choose with one device, a row of buttons with more.
+function renderSendTo() {
+  const online = devices.filter(d => d.online);
+  sendTo.hidden = online.length === 0;
+  if (!online.length) return;
+  const chosen = link.target();
+  if (online.length === 1) {
+    sendToLabel.textContent = "Sending to";
+    sendToChips.replaceChildren(el("span", "chip fixed", online[0].label));
+    return;
+  }
+  sendToLabel.textContent = "Send to";
+  sendToChips.replaceChildren(...online.map(d => {
+    const b = el("button", "chip", d.label);
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(d.id === chosen));
+    b.addEventListener("click", () => { link.setTarget(d.id); });
+    return b;
+  }));
+}
+
+function renderPairing(state, info = {}) {
+  pairingState = state;
+  const busy = state === "waiting" || state === "connecting" || state === "confirm";
+  if (busy) pairOpen = true;
+  if (state === "idle" && info.paired) pairOpen = false;
+  pairPanel.hidden = !pairOpen;
+  addDeviceButton.hidden = pairOpen;
+  connectIdle.hidden = busy;
+  connectWaiting.hidden = !(state === "waiting" || state === "connecting");
+  pairConfirm.hidden = state !== "confirm";
+  showConnectError(state === "error" ? info.message : "");
+  if (state === "waiting") {
+    connectWaitLabel.textContent = "Your code";
+    codeDisplay.textContent = `${info.code.slice(0, 3)} ${info.code.slice(3)}`;
+    connectWaitText.textContent = "On the other device, press “+ Link another device with a code” and type this number. It stops working after 2 minutes.";
+  } else if (state === "connecting") {
+    connectWaitLabel.textContent = "Connecting…";
+    codeDisplay.textContent = "• • •";
+    connectWaitText.textContent = "Looking for the other device.";
+  } else if (state === "confirm") {
+    confirmTitle.textContent = `“${info.name}” wants to link with this device`;
+    confirmAllow.onclick = () => info.allow();
+    confirmDeny.onclick = () => info.deny();
+  }
+  updateCoach();
+}
+
+addDeviceButton.addEventListener("click", () => { pairOpen = true; renderPairing(pairingState, {}); });
+pairClose.addEventListener("click", () => { pairOpen = false; link.cancelPairing(); renderPairing("idle", {}); });
 hostButton.addEventListener("click", () => { link.host().catch(() => {}); });
-reconnectButton.addEventListener("click", () => { link.reconnect().catch(() => {}); });
-forgetButton.addEventListener("click", () => { link.forget(); showPair = false; log("Forgot the remembered device"); });
-anotherButton.addEventListener("click", () => { showPair = true; renderConnect(lastConnect.state, lastConnect.info); });
-pairBackButton.addEventListener("click", () => { showPair = false; renderConnect(lastConnect.state, lastConnect.info); });
 sendNowButton.addEventListener("click", () => { if (stagedFile) onThrow(stagedFile, null); });
-cancelConnect.addEventListener("click", () => link.disconnect());
-disconnectButton.addEventListener("click", () => { link.disconnect(); log("Disconnected"); });
+cancelConnect.addEventListener("click", () => { link.cancelPairing(); });
+
+renameButton.addEventListener("click", () => {
+  renameInput.value = link.name;
+  renameForm.hidden = false; renameButton.hidden = true; meName.hidden = true;
+  renameInput.focus(); renameInput.select();
+});
+renameForm.addEventListener("submit", event => {
+  event.preventDefault();
+  link.setName(renameInput.value);
+  renameForm.hidden = true; renameButton.hidden = false; meName.hidden = false;
+  meName.textContent = link.name;
+});
+renameInput.addEventListener("keydown", event => {
+  if (event.key === "Escape") { renameForm.hidden = true; renameButton.hidden = false; meName.hidden = false; }
+});
 
 joinInput.addEventListener("input", () => {
   const digits = joinInput.value.replace(/\D/g, "").slice(0, 6);
@@ -551,10 +648,10 @@ function renderIncoming() {
   incomingBox.classList.toggle("waiting", !!incoming || !!receiving);
   if (incoming) {
     incomingName.textContent = incoming.name;
-    incomingMeta.textContent = `${fmtSize(incoming.size)} · waiting for you to catch it`;
+    incomingMeta.textContent = `${fmtSize(incoming.size)}${incoming.from ? " · from " + incoming.from : ""} · waiting for you to catch it`;
   } else if (receiving) {
     incomingName.textContent = receiving.name;
-    incomingMeta.textContent = `${fmtSize(receiving.size)} · arriving now`;
+    incomingMeta.textContent = `${fmtSize(receiving.size)}${receiving.from ? " · from " + receiving.from : ""} · arriving now`;
   } else {
     incomingName.textContent = "Nothing incoming";
     incomingMeta.textContent = link.connected
@@ -727,13 +824,13 @@ function updateCoach(force = false) {
 
   if (tab === "send") {
     if (!stagedFile) setCoach("Choose a file to send", "Pick one below, or drop it on the box.");
-    else if (!link.connected && !holding) setCoach("Connect a device to send", "You can practise the gesture now, but nothing is sent until a device is connected.", "warn");
+    else if (!link.connected && !holding) setCoach("No device is online", "You can practise the gesture now. Open GestureShare on your other device, or add one above.", "warn");
     else if (holding) setCoach("Now flick to send", `Move your hand quickly sideways. Holding ${file}.`, "ok");
     else if (!handOn) setCoach("Show your hand", `Then make a fist to pick up ${file}.`);
     else setCoach("Make a fist", `Hold it for half a second to pick up ${file}.`);
   } else {
     if (!incoming && link.connected) setCoach("Waiting for a file", "Ask the other device to throw you one.");
-    else if (!incoming) setCoach("Connect a device to receive", "Pair with the code at the top, or use the demo to practise catching.");
+    else if (!incoming) setCoach("No device is online", "Open GestureShare on your other device, or add one above. You can also use the demo to practise catching.");
     else if (!handOn) setCoach("Show your hand", `Then hold an open palm to catch ${incoming.name}.`, "warn");
     else setCoach("Hold an open palm", `Keep all five fingers out for half a second to catch ${incoming.name}.`, "warn");
   }
@@ -1360,10 +1457,11 @@ helpButton.addEventListener("click", () => {
   chrome.tabs.create({ url: "chrome://settings/content/camera" });
 });
 
-window.addEventListener("pagehide", () => { stopCamera(false); link.disconnect(true); });
+window.addEventListener("pagehide", () => { stopCamera(false); link.stop(); });
 
 // Stay findable for the remembered device, and reconnect to it without a code.
-renderConnect("idle", { paired: link.paired ? { name: link.paired.name } : null });
+renderDevices(link.list());
+renderPairing("idle", {});
 if (MODE !== "setup") link.start().catch(() => {});
 
 closeButton?.addEventListener("click", () => {
