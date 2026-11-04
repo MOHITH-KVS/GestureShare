@@ -91,8 +91,11 @@ const confirmAllow = document.getElementById("confirm-allow");
 const confirmDeny = document.getElementById("confirm-deny");
 const listMine = document.getElementById("list-mine");
 const listOther = document.getElementById("list-other");
-const emptyMine = document.getElementById("empty-mine");
-const emptyOther = document.getElementById("empty-other");
+const secMine = document.getElementById("sec-mine");
+const secOther = document.getElementById("sec-other");
+const devicesNone = document.getElementById("devices-none");
+const joinOpen = document.getElementById("join-open");
+const pairChoices = document.getElementById("pair-choices");
 const meName = document.getElementById("me-name");
 const renameButton = document.getElementById("rename-btn");
 const renameForm = document.getElementById("rename-form");
@@ -129,6 +132,9 @@ const fileMeta = document.getElementById("file-meta");
 const fileInput = document.getElementById("file-input");
 const chooseFileButton = document.getElementById("choose-file");
 const sampleFileButton = document.getElementById("sample-file");
+const chooseFolderButton = document.getElementById("choose-folder");
+const folderInput = document.getElementById("folder-input");
+const soundToggle = document.getElementById("sound-toggle");
 const clearFileButton = document.getElementById("clear-file");
 
 const simulateButton = document.getElementById("simulate-incoming");
@@ -212,6 +218,42 @@ let lastProgressAt = 0;
 let bannerTimer = null;
 let throwCount = 0;
 
+
+// ---------------------------------------------------------------------------------------------
+// Sounds (a short chime when something happens, so you do not have to watch the screen)
+// ---------------------------------------------------------------------------------------------
+let soundOn = true;
+try { soundOn = localStorage.getItem("gestureshare.sound") !== "off"; } catch { /* storage blocked: keep the default */ }
+soundToggle.checked = soundOn;
+soundToggle.addEventListener("change", () => {
+  soundOn = soundToggle.checked;
+  try { localStorage.setItem("gestureshare.sound", soundOn ? "on" : "off"); } catch {}
+  if (soundOn) playSound("sent");
+});
+let audioCtx = null;
+const SOUNDS = { incoming: [660, 880], received: [523, 659, 784], sent: [784, 988], error: [300, 220] };
+function playSound(kind) {
+  if (!soundOn) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    let t = audioCtx.currentTime + 0.02;
+    for (const freq of SOUNDS[kind] || []) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = kind === "error" ? "triangle" : "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + 0.18);
+      t += 0.11;
+    }
+  } catch { /* no audio available: silent is fine */ }
+  try { if (navigator.vibrate) navigator.vibrate(kind === "error" ? [80, 60, 80] : 60); } catch {}
+}
+
 // ---------------------------------------------------------------------------------------------
 // Device link: pairing code + direct file transfer (see transfer.js)
 // ---------------------------------------------------------------------------------------------
@@ -232,6 +274,7 @@ const link = new GestureLink({
     if (event.type === "connected") { log(`${who} is online`); }
     else if (event.type === "disconnected") {
       log(`${who} went offline`);
+      queue = null;
       receiving = null; hideProgress(recvProgress); hideProgress(sendProgress);
       renderIncoming();
     }
@@ -243,7 +286,7 @@ const link = new GestureLink({
     const from = offer.from ? offer.from.name : "the other device";
     if (offer.auto) {
       // A device you trust: the file starts arriving by itself, nothing to press.
-      receiving = { id: offer.id, name: offer.name, size: offer.size, from };
+      receiving = { id: offer.id, name: offer.name, size: offer.size, from, batch: offer.batch };
       renderIncoming();
       recvProgress.hidden = false; recvProgress.dataset.done = "false";
       recvProgressText.textContent = "Starting…";
@@ -254,6 +297,7 @@ const link = new GestureLink({
       return;
     }
     setIncoming({ ...offer, from }, 60000);
+    playSound("incoming");
     showBanner(`${from} wants to send: ${offer.name}`, "info", 2600);
     log(`${offer.name} from ${from} is incoming (${fmtSize(offer.size)})`);
   },
@@ -289,7 +333,8 @@ const link = new GestureLink({
     saveBlob(blob, offer.name);
     showProgressDone(recvProgress, recvProgressText, recvProgressFill, "Saved to your Downloads folder");
     renderIncoming();
-    showBanner(`Received ✓  ${offer.name}`, "ok", 2600);
+    showBanner(`Received ✓  ${offer.name}${offer.batch ? ` (${offer.batch.i + 1} of ${offer.batch.n})` : ""}`, "ok", 2600);
+    if (!offer.batch || offer.batch.i >= offer.batch.n - 1) playSound("received");
     log(`Received ${offer.name}${offer.from ? " from " + offer.from.name : ""} (${fmtSize(offer.size)}), saved to Downloads`);
     updateCoach();
   },
@@ -304,22 +349,34 @@ const link = new GestureLink({
         sendProgressText.textContent = `Sending ${outgoingName}…`;
         break;
       case "delivered":
+        if (queue && queue.index < queue.items.length - 1) {          // more files to go
+          log(`Delivered ${outgoingName}`);
+          queue.index++;
+          setTimeout(sendNext, 0);                                     // after this send has fully ended
+          break;
+        }
+        queue = null;
         showProgressDone(sendProgress, sendProgressText, sendProgressFill, `Delivered ✓  ${outgoingName}`);
         showBanner(`Delivered ✓  ${outgoingName}`, "ok", 2600);
         log(`Delivered ${outgoingName}`);
+        playSound("sent");
         break;
       case "declined":
+        queue = null;
         hideProgress(sendProgress);
         showBanner("They declined the file", "warn", 2600);
         log(`${outgoingName} was declined`);
         break;
       case "expired":
+        queue = null;
         hideProgress(sendProgress);
         showBanner("Nobody caught it in time", "warn", 2600);
         log(`${outgoingName} expired: not caught within a minute`);
         break;
       case "failed":
+        queue = null;
         hideProgress(sendProgress);
+        playSound("error");
         showBanner("Sending failed", "warn", 2600);
         log(`${outgoingName} failed: ${detail || "connection problem"}`);
         break;
@@ -328,7 +385,25 @@ const link = new GestureLink({
   }
 });
 
-// The throw gesture: send the staged file to the connected device.
+// The throw gesture: send the staged file(s) to the chosen device, one after the other.
+let queue = null;          // { items: File[], index, toId, batch }
+const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, "0")).join("");
+
+function sendNext() {
+  const q = queue;
+  if (!q) return;
+  const f = q.items[q.index];
+  outgoingName = q.items.length > 1 ? `${f.name} (${q.index + 1} of ${q.items.length})` : f.name;
+  try {
+    link.sendFile(f, q.toId, q.batch ? { id: q.batch, i: q.index, n: q.items.length } : undefined);
+  } catch (error) {
+    queue = null;
+    showBanner("Could not send", "warn");
+    log(`Could not send ${f.name}: ${error.message}`);
+    updateCoach();
+  }
+}
+
 function onThrow(file, direction) {
   const arrow = direction ? ARROWS[direction] : "";       // no direction = the "Send now" button
   if (!link.connected) {
@@ -336,22 +411,18 @@ function onThrow(file, direction) {
     log(`Not sent: no device online (${file.name})`);
     return;
   }
-  if (link.outgoing) {
+  if (link.outgoing || queue) {
     showBanner("Still sending the last file", "warn", 2200);
     return;
   }
-  try {
-    const toId = link.target();
-    const to = (link.list().find(d => d.id === toId) || {}).label || "";
-    outgoingName = file.name;
-    outgoingTo = to;
-    link.sendFile(file.file || makeSampleFile(file), toId);
-    showBanner(`${direction ? "Thrown" : "Sending"} ${arrow}  ${file.name}${to ? " to " + to : ""}`, "ok");
-    log(direction ? `Threw ${file.name} ${arrow}${to ? " to " + to : ""}` : `Sending ${file.name}${to ? " to " + to : ""}`);
-  } catch (error) {
-    showBanner("Could not send", "warn");
-    log(`Could not send ${file.name}: ${error.message}`);
-  }
+  const toId = link.target();
+  const to = (link.list().find(d => d.id === toId) || {}).label || "";
+  const items = file.files ? file.files : [file.file || makeSampleFile(file)];
+  outgoingTo = to;
+  queue = { items, index: 0, toId, batch: items.length > 1 ? randomId() : null };
+  showBanner(`${direction ? "Thrown" : "Sending"} ${arrow}  ${file.name}${to ? " to " + to : ""}`, "ok");
+  log(direction ? `Threw ${file.name} ${arrow}${to ? " to " + to : ""}` : `Sending ${file.name}${to ? " to " + to : ""}`);
+  sendNext();
 }
 
 // "Use a sample file" has no real file behind it, so make real bytes of that size.
@@ -362,7 +433,7 @@ function makeSampleFile(file) {
 }
 
 function saveBlob(blob, name) {
-  const safe = String(name).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 200) || "file";
+  const safe = String(name).replace(/[\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 200) || "file";
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -410,15 +481,13 @@ function deviceRow(d, mine) {
   li.dataset.online = String(d.online);
   const text = el("span", "d-text");
   text.append(el("b", "", d.label));
-  const where = d.source === "account" ? " · your Chrome account" : "";
-  text.append(el("span", "", d.stale ? "Not linked any more. Remove it and link it again."
-    : `${d.online ? "Online" : "Offline"}${where}`));
+  text.append(el("span", "", d.stale ? "Not linked any more" : d.online ? "Online" : "Offline"));
   const actions = el("span", "d-actions");
   if (!d.stale) {
-    if (mine) actions.append(smallButton("Ask me first", () => link.setAuto(d.id, false)));
-    else actions.append(smallButton("Add to My devices", () => link.setAuto(d.id, true), "chip-btn yes"));
+    if (mine) actions.append(smallButton("Ask first", () => link.setAuto(d.id, false), "chip-btn"));
+    else actions.append(smallButton("Trust", () => link.setAuto(d.id, true), "chip-btn yes"));
   }
-  if (d.source !== "account") actions.append(smallButton("Remove", () => { link.remove(d.id); log(`Removed ${d.label}`); }));
+  if (d.source !== "account") actions.append(smallButton("Remove", () => { link.remove(d.id); log(`Removed ${d.label}`); }, "chip-btn quiet"));
   li.append(el("span", "dot"), text, actions);
   return li;
 }
@@ -431,8 +500,9 @@ function renderDevices(list) {
   const other = list.filter(d => !(d.auto === true && !d.stale));
   listMine.replaceChildren(...mine.map(d => deviceRow(d, true)));
   listOther.replaceChildren(...other.map(d => deviceRow(d, false)));
-  emptyMine.hidden = mine.length > 0;
-  emptyOther.hidden = other.length > 0;
+  secMine.hidden = mine.length === 0;
+  secOther.hidden = other.length === 0;
+  devicesNone.hidden = list.length > 0;
   renderSendTo();
   renderIncoming();
   demoBox.hidden = online.length > 0;
@@ -471,23 +541,27 @@ function renderPairing(state, info = {}) {
   connectIdle.hidden = busy;
   connectWaiting.hidden = !(state === "waiting" || state === "connecting");
   pairConfirm.hidden = state !== "confirm";
+  if (!busy && !pairOpen) { joinForm.hidden = true; pairChoices.hidden = false; }
+  if (state !== "waiting" && qrBox) qrBox.hidden = true;
   showConnectError(state === "error" ? info.message : "");
   if (state === "waiting") {
     connectWaitLabel.textContent = "Your code";
     codeDisplay.textContent = `${info.code.slice(0, 3)} ${info.code.slice(3)}`;
-    connectWaitText.textContent = "On the other device, press “+ Link another device with a code” and type this number. It stops working after 2 minutes.";
+    connectWaitText.textContent = "Type this on the other device within 2 minutes.";
+    if (typeof drawQr === "function") drawQr(qrPayload(info.code));
   } else if (state === "connecting") {
     connectWaitLabel.textContent = "Connecting…";
     codeDisplay.textContent = "• • •";
     connectWaitText.textContent = "Looking for the other device.";
   } else if (state === "confirm") {
-    confirmTitle.textContent = `“${info.name}” wants to link with this device`;
+    confirmTitle.textContent = `Allow “${info.name}” to link?`;
     confirmAllow.onclick = () => info.allow();
     confirmDeny.onclick = () => info.deny();
   }
   updateCoach();
 }
 
+joinOpen.addEventListener("click", () => { pairChoices.hidden = true; joinForm.hidden = false; joinInput.focus(); });
 addDeviceButton.addEventListener("click", () => { pairOpen = true; renderPairing(pairingState, {}); });
 pairClose.addEventListener("click", () => { pairOpen = false; link.cancelPairing(); renderPairing("idle", {}); });
 hostButton.addEventListener("click", () => { link.host().catch(() => {}); });
@@ -595,20 +669,74 @@ function setStagedFile(file) {
 
   filebox.classList.toggle("has-file", !!file);
   fileName.textContent = file ? file.name : "No file chosen";
-  fileMeta.textContent = file ? fmtSize(file.size) : "Choose a file, or drop one here.";
+  fileMeta.textContent = file ? (file.meta || fmtSize(file.size)) : "Choose files or a folder, or drop them here.";
   clearFileButton.hidden = !file;
   heldName.textContent = file ? file.name : "file";
   applyMode();
 }
 
-chooseFileButton.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", () => {
-  const f = fileInput.files[0];
-  if (f) {
-    setStagedFile({ name: f.name, size: f.size, file: f });
-    log(`Chose ${f.name}`);
+// One or many things to send: [{ name, size, file }]
+function stageList(items) {
+  if (!items.length) return;
+  if (items.length === 1) {
+    const it = items[0];
+    setStagedFile({ name: it.name, size: it.size, file: it.file });
+    log(`Chose ${it.name}`);
+  } else {
+    const names = items.map(i => i.name);
+    const total = items.reduce((n, i) => n + i.size, 0);
+    setStagedFile({
+      name: `${items.length} files`, size: total, files: items.map(i => i.file),
+      meta: `${names.slice(0, 2).join(", ")}${names.length > 2 ? `, +${names.length - 2} more` : ""} · ${fmtSize(total)}`
+    });
+    log(`Chose ${items.length} files (${fmtSize(total)})`);
   }
+  selectTab("send");
+}
+const asItem = f => ({ name: f.name, size: f.size, file: f });
+
+// A folder becomes one .zip, so its structure arrives intact.
+let packing = false;
+async function packFolders(folders) {
+  const out = [];
+  packing = true;
+  for (const folder of folders) {
+    if (!folder.entries.length) { showBanner(`“${folder.name}” is empty`, "warn", 2400); continue; }
+    fileName.textContent = `Packing “${folder.name}”…`;
+    fileMeta.textContent = `${folder.entries.length} files`;
+    try {
+      const zip = await GSZip.build(folder.entries, `${folder.name}.zip`, (done, total) => {
+        fileMeta.textContent = `${folder.entries.length} files · ${Math.round((done / Math.max(total, 1)) * 100)}%`;
+      });
+      out.push(asItem(zip));
+      log(`Packed folder ${folder.name} (${folder.entries.length} files)`);
+    } catch (error) {
+      showBanner(error.message, "warn", 4000);
+      log(`Could not pack ${folder.name}: ${error.message}`);
+    }
+  }
+  packing = false;
+  return out;
+}
+async function stageFilesAndFolders(files, folders) {
+  const packed = folders.length ? await packFolders(folders) : [];
+  const items = [...files.map(asItem), ...packed];
+  if (items.length) stageList(items); else setStagedFile(stagedFile);
+}
+
+chooseFileButton.addEventListener("click", () => fileInput.click());
+chooseFolderButton.addEventListener("click", () => folderInput.click());
+fileInput.addEventListener("change", () => {
+  const files = Array.from(fileInput.files || []);
   fileInput.value = "";
+  if (files.length) stageList(files.map(asItem));
+});
+folderInput.addEventListener("change", () => {
+  const files = Array.from(folderInput.files || []);
+  folderInput.value = "";
+  if (!files.length) return;
+  const name = (files[0].webkitRelativePath || "folder").split("/")[0] || "folder";
+  stageFilesAndFolders([], [{ name, entries: files.map(f => ({ path: f.webkitRelativePath || f.name, file: f })) }]);
 });
 sampleFileButton.addEventListener("click", () => {
   setStagedFile({ name: "sample-photo.jpg", size: 2_400_000 });
@@ -619,12 +747,32 @@ clearFileButton.addEventListener("click", () => {
   hideHeldChip();
 });
 
-// Drop a file ANYWHERE on the page. (If the page ignores a drop, Chrome opens the file in this tab
-// and the user loses GestureShare, so the whole window has to accept it.)
-function stageDropped(file) {
-  setStagedFile({ name: file.name, size: file.size, file });
-  selectTab("send");
-  log(`Chose ${file.name}`);
+// Drop files or folders ANYWHERE on the page. (If the page ignores a drop, Chrome opens the file in
+// this tab and the user loses GestureShare, so the whole window has to accept it.)
+const readEntry = entry => new Promise(resolve => entry.file(resolve, () => resolve(null)));
+async function walkDirectory(dir, prefix) {
+  const out = [];
+  const reader = dir.createReader();
+  for (;;) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) break;
+    for (const e of batch) {
+      if (e.isFile) { const f = await readEntry(e); if (f) out.push({ path: `${prefix}/${e.name}`, file: f }); }
+      else if (e.isDirectory) out.push(...await walkDirectory(e, `${prefix}/${e.name}`));
+    }
+  }
+  return out;
+}
+async function stageDrop(dt) {
+  const plain = Array.from(dt.files || []);
+  const entries = Array.from(dt.items || []).map(i => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);   // read now: the list empties after the first await
+  if (!entries.some(e => e.isDirectory)) { if (plain.length) stageList(plain.map(asItem)); return; }
+  const files = [], folders = [];
+  for (const e of entries) {
+    if (e.isFile) { const f = await readEntry(e); if (f) files.push(f); }
+    else folders.push({ name: e.name, entries: await walkDirectory(e, e.name) });
+  }
+  await stageFilesAndFolders(files, folders);
 }
 window.addEventListener("dragover", e => {
   e.preventDefault();
@@ -637,8 +785,7 @@ window.addEventListener("dragleave", e => {
 window.addEventListener("drop", e => {
   e.preventDefault();
   filebox.classList.remove("dragover");
-  const f = e.dataTransfer && e.dataTransfer.files[0];
-  if (f) stageDropped(f);
+  if (e.dataTransfer) stageDrop(e.dataTransfer).catch(error => log(`Could not read the drop: ${error.message}`));
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -648,10 +795,12 @@ function renderIncoming() {
   incomingBox.classList.toggle("waiting", !!incoming || !!receiving);
   if (incoming) {
     incomingName.textContent = incoming.name;
-    incomingMeta.textContent = `${fmtSize(incoming.size)}${incoming.from ? " · from " + incoming.from : ""} · waiting for you to catch it`;
+    incomingMeta.textContent = incoming.batch
+      ? `File 1 of ${incoming.batch.n} · from ${incoming.from} · catch it to receive all ${incoming.batch.n}`
+      : `${fmtSize(incoming.size)}${incoming.from ? " · from " + incoming.from : ""} · waiting for you to catch it`;
   } else if (receiving) {
     incomingName.textContent = receiving.name;
-    incomingMeta.textContent = `${fmtSize(receiving.size)}${receiving.from ? " · from " + receiving.from : ""} · arriving now`;
+    incomingMeta.textContent = `${receiving.batch ? `File ${receiving.batch.i + 1} of ${receiving.batch.n} · ` : ""}${fmtSize(receiving.size)}${receiving.from ? " · from " + receiving.from : ""} · arriving now`;
   } else {
     incomingName.textContent = "Nothing incoming";
     incomingMeta.textContent = link.connected
@@ -798,6 +947,7 @@ function setCoach(title, sub, tone = "info") {
   const key = `${title}|${sub}|${tone}`;
   if (key === lastCoach) return;
   lastCoach = key;
+  coach.hidden = false;
   coachTitle.textContent = title;
   coachSub.textContent = sub;
   coach.dataset.tone = tone;
@@ -805,13 +955,13 @@ function setCoach(title, sub, tone = "info") {
 
 // One instruction at a time: what to do next.
 function updateCoach(force = false) {
-  sendNowButton.disabled = !(stagedFile && link.connected && !link.outgoing);
+  sendNowButton.disabled = !(stagedFile && link.connected && !link.outgoing && !queue && !packing);
   if (force) lastCoach = "";
   if (override) { setCoach(override.title, override.sub, override.tone); return; }
   if (!running) {
     if (incoming) setCoach("Incoming file", `${incoming.name} is waiting. Turn on the camera to catch it, or select Accept.`, "warn");
     else if (stagedFile && tab === "send") setCoach("File ready", `Turn on the camera, then make a fist to pick up ${stagedFile.name}.`, "ok");
-    else setCoach("Turn on the camera", "GestureShare uses your camera to see your hand. Nothing is recorded.");
+    else { lastCoach = ""; coach.hidden = true; }      // the camera box already says this
     return;
   }
   if (document.hidden) { setCoach("Paused", "This window is hidden. Bring it back to continue.", "warn"); return; }
@@ -1278,6 +1428,7 @@ function handleLandmarks(rawLandmarks, now = performance.now()) {
 
   // Gestures: only confirmed hands reach the engine, and it gets the raw (un-smoothed) points.
   for (const event of engine.update(rawLandmarks, now, size)) onGesture(event);
+  calibFeed(now);
 
   const landmarks = smooth(rawLandmarks);
 
@@ -1290,9 +1441,9 @@ function handleLandmarks(rawLandmarks, now = performance.now()) {
   if (now - lastUiAt > 50) {
     lastUiAt = now;
     debugText.textContent =
-      `pose ${engine.pose} · openness ${engine.openness.toFixed(2)} (fist < ${FIST_BELOW}, open > ${OPEN_ABOVE}) · ` +
+      `pose ${engine.pose} · openness ${engine.openness.toFixed(2)} (fist < ${engine.o.fistBelow.toFixed(2)}, open > ${engine.o.openAbove.toFixed(2)}) · ` +
       `shortest finger ${engine.minTip.toFixed(2)} · pinch ${engine.pinchRatio.toFixed(2)} · ` +
-      `speed ${engine.speed.toFixed(1)} (send ≥ ${THROW_SPEED}, peak ${engine.peakSpeed.toFixed(1)}) · ` +
+      `speed ${engine.speed.toFixed(1)} (send ≥ ${engine.o.throwSpeed.toFixed(2)}, peak ${engine.peakSpeed.toFixed(1)}) · ` +
       `confidence ${Math.round(lastScore * 100)}%`;
   }
 }
@@ -1457,12 +1608,126 @@ helpButton.addEventListener("click", () => {
   chrome.tabs.create({ url: "chrome://settings/content/camera" });
 });
 
-window.addEventListener("pagehide", () => { stopCamera(false); link.stop(); });
+window.addEventListener("pagehide", () => { stopCamera(false); link.stop(); try { hubChannel && hubChannel.postMessage({ t: "ui-closed", id: WINDOW_ID }); } catch {} });
 
 // Stay findable for the remembered device, and reconnect to it without a code.
+// ---- "Send with GestureShare" from the right-click menu ---------------------------------------
+// background.js leaves a note ({url}) in session storage; this page fetches it and stages it as the
+// file to send. If Chrome blocks the download (the site does not allow it), one tap on "Allow" asks
+// for permission to read that single site.
+const fetchBox = document.getElementById("fetch-box");
+const fetchTitle = document.getElementById("fetch-title");
+const fetchText = document.getElementById("fetch-text");
+const fetchActions = document.getElementById("fetch-actions");
+const fetchAllow = document.getElementById("fetch-allow");
+const fetchCancel = document.getElementById("fetch-cancel");
+const PENDING_KEY = "gs.pending";
+const extStore = typeof chrome !== "undefined" && chrome.storage && chrome.storage.session ? chrome.storage.session : null;
+let pendingFetch = null;
+
+function fileNameFromResponse(url, response, blob) {
+  const cd = response.headers.get("content-disposition") || "";
+  let name = (/filename\*=UTF-8''([^;]+)/i.exec(cd) || [])[1];
+  if (name) { try { name = decodeURIComponent(name); } catch {} }
+  if (!name) name = (/filename="?([^";]+)"?/i.exec(cd) || [])[1];
+  if (!name) { try { name = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || ""); } catch { name = ""; } }
+  name = (name || "download").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 120);
+  if (!/\.[a-z0-9]{1,6}$/i.test(name)) {
+    const ext = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg", "video/mp4": "mp4", "video/webm": "webm", "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/wav": "wav", "application/pdf": "pdf" }[(blob.type || "").split(";")[0]];
+    if (ext) name += "." + ext;
+  }
+  return name;
+}
+
+function showFetch(title, text, askPermission) {
+  fetchBox.hidden = false;
+  fetchTitle.textContent = title;
+  fetchText.textContent = text || "";
+  fetchActions.hidden = !askPermission;
+  selectTab("send");
+}
+function hideFetch() { fetchBox.hidden = true; pendingFetch = null; }
+
+async function runFetch(url) {
+  let host = url;
+  try { host = new URL(url).host; } catch {}
+  showFetch("Getting the file…", host, false);
+  try {
+    const response = await fetch(url, { credentials: "omit" });
+    if (!response.ok) throw new Error(`The site answered ${response.status}`);
+    const blob = await response.blob();
+    const file = new File([blob], fileNameFromResponse(url, response, blob), { type: blob.type });
+    hideFetch();
+    stageList([asItem(file)]);
+    showBanner(`Ready to send ${file.name}`, "ok", 2200);
+    log(`Took ${file.name} from ${host} (${fmtSize(file.size)})`);
+  } catch (error) {
+    const canAsk = typeof chrome !== "undefined" && chrome.permissions && /^https?:/i.test(url);
+    pendingFetch = { url, host };
+    if (canAsk) showFetch("Chrome needs your OK", `To send this file, GestureShare must read it from ${host}. Allow it for that site only?`, true);
+    else showFetch("Could not get the file", error.message, false);
+    log(`Could not get the file from ${host}: ${error.message}`);
+  }
+}
+
+fetchAllow.addEventListener("click", async () => {
+  if (!pendingFetch) return;
+  const { url } = pendingFetch;
+  let granted = false;
+  try { granted = await chrome.permissions.request({ origins: [new URL(url).origin + "/*"] }); } catch {}
+  if (granted) runFetch(url);
+  else showFetch("Not allowed", "No problem. Nothing was downloaded.", false);
+});
+fetchCancel.addEventListener("click", hideFetch);
+
+async function takePending() {
+  if (!extStore) return;
+  try {
+    const got = await extStore.get(PENDING_KEY);
+    const note = got && got[PENDING_KEY];
+    if (!note || !note.url || Date.now() - note.at > 60000) return;
+    await extStore.remove(PENDING_KEY);
+    runFetch(note.url);
+  } catch { /* nothing waiting */ }
+}
+if (extStore) {
+  try { chrome.storage.onChanged.addListener((changes, area) => { if (area === "session" && changes[PENDING_KEY] && changes[PENDING_KEY].newValue) takePending(); }); } catch {}
+  takePending();
+}
+
+// ---- Hand over to / take back from the hidden background receiver (hub.js) --------------------
+// While no GestureShare window is open, a hidden page keeps this device findable so files from
+// "My devices" still arrive. When a window opens, the hidden page steps aside (two pages cannot be
+// the same device at once) and takes over again when the last window closes.
+const BG_KEY = "gestureshare.background";
+var hubChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("gestureshare-hub") : null;
+var WINDOW_ID = randomId();
+function startLink() {
+  if (MODE === "setup") return;
+  if (!hubChannel) { link.start().catch(() => {}); return; }
+  let started = false;
+  const go = () => { if (started) return; started = true; link.start().catch(() => {}); };
+  hubChannel.addEventListener("message", event => {
+    const m = event.data || {};
+    if (m.t === "hub-ack" && m.id === WINDOW_ID) setTimeout(go, m.wasRunning ? 500 : 0);
+  });
+  hubChannel.postMessage({ t: "ui-open", id: WINDOW_ID });
+  setTimeout(go, 1500);                                           // nobody answered: carry on alone
+  setInterval(() => { try { hubChannel.postMessage({ t: "ui-alive", id: WINDOW_ID }); } catch {} }, 3000);
+}
+const bgToggle = document.getElementById("bg-toggle");
+if (bgToggle) {
+  try { bgToggle.checked = localStorage.getItem(BG_KEY) !== "off"; } catch {}
+  bgToggle.addEventListener("change", () => {
+    try { localStorage.setItem(BG_KEY, bgToggle.checked ? "on" : "off"); } catch {}
+    try { hubChannel && hubChannel.postMessage({ t: "settings" }); } catch {}
+    log(bgToggle.checked ? "Files from My devices will arrive even when GestureShare is closed" : "Files will only arrive while GestureShare is open");
+  });
+}
+
 renderDevices(link.list());
 renderPairing("idle", {});
-if (MODE !== "setup") link.start().catch(() => {});
+startLink();
 
 closeButton?.addEventListener("click", () => {
   stopCamera(false);
@@ -1471,3 +1736,243 @@ closeButton?.addEventListener("click", () => {
 
 renderIncoming();
 updateCoach();
+
+// ---------------------------------------------------------------------------------------------
+// Tune gestures to this person's hand: measure a fist, an open palm and three flicks, then set
+// the thresholds halfway between what this hand actually does.
+// ---------------------------------------------------------------------------------------------
+const CALIB_KEY = "gestureshare.calib";
+const calibEl = document.getElementById("calib");
+const calibVisual = document.getElementById("calib-visual");
+const calibText = document.getElementById("calib-text");
+const calibFill = document.getElementById("calib-fill");
+const calibGo = document.getElementById("calib-go");
+const calibCancel = document.getElementById("calib-cancel");
+const calibReset = document.getElementById("calib-reset");
+const calibButton = document.getElementById("calibrate-btn");
+const DEFAULT_TUNING = { fistBelow: engine.o.fistBelow, openAbove: engine.o.openAbove, throwSpeed: engine.o.throwSpeed };
+
+function applyTuning(t) {
+  engine.o.fistBelow = t.fistBelow; engine.o.openAbove = t.openAbove; engine.o.throwSpeed = t.throwSpeed;
+}
+try {
+  const saved = JSON.parse(localStorage.getItem(CALIB_KEY) || "null");
+  if (saved && saved.openAbove > saved.fistBelow && saved.throwSpeed > 0.4) applyTuning(saved);
+} catch { /* nothing saved */ }
+
+const median = list => { const s = [...list].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+let calib = null;     // { step: "intro"|"fist"|"open"|"flick"|"done", samples, ... }
+
+function calibShow(step, visual, text, goLabel) {
+  calibVisual.textContent = visual;
+  calibText.textContent = text;
+  calibGo.textContent = goLabel || "";
+  calibGo.hidden = !goLabel;
+  calibFill.style.width = "0%";
+}
+
+function calibOpen() {
+  if (!running) { showBanner("Turn on the camera first", "warn", 2400); return; }
+  calib = { step: "intro" };
+  calibEl.hidden = false;
+  calibShow("intro", "🖐️", "We will measure your hand in three short steps: a fist, an open palm, and three flicks. Keep your hand in view of the camera.", "Start");
+  calibGo.focus();
+}
+function calibClose() { calib = null; calibEl.hidden = true; calibButton.focus(); }
+
+function calibBegin(step) {
+  calib = { step, samples: [], started: 0, peaks: [], burst: 0, quiet: 0, fist: calib.fist, open: calib.open };
+  if (step === "fist") calibShow(step, "✊", "Make a fist and hold it still.");
+  if (step === "open") calibShow(step, "✋", "Now open your hand wide, all five fingers out, and hold it still.");
+  if (step === "flick") calibShow(step, "👉", "Now flick your hand sideways, quickly, three times. Pause a moment between flicks.");
+  calibGo.hidden = true;
+}
+
+function calibFeed(now) {
+  if (!calib || !calib.step || calib.step === "intro" || calib.step === "done") return;
+  if (!confirmed) { calib.started = 0; calib.samples.length = 0; calibFill.style.width = "0%"; return; }   // wait for a steady hand
+  if (calib.step === "fist" || calib.step === "open") {
+    if (!calib.started) calib.started = now;
+    calib.samples.push(engine.openness);
+    const progress = Math.min((now - calib.started) / 2500, 1);
+    calibFill.style.width = `${Math.round(progress * 100)}%`;
+    if (progress >= 1) {
+      const value = median(calib.samples);
+      calibBegin(calib.step === "fist" ? "open" : "flick");
+      if (calib.step === "open") calib.fist = value; else calib.open = value;
+      // keep the earlier readings through the step change
+    }
+    return;
+  }
+  if (calib.step === "flick") {
+    if (!calib.started) calib.started = now;
+    const speed = engine.speed;
+    if (speed > 0.6) { calib.burst = Math.max(calib.burst, speed); calib.quiet = 0; }
+    else if (calib.burst) {
+      if (++calib.quiet >= 5) { if (calib.burst > 0.8) calib.peaks.push(calib.burst); calib.burst = 0; calib.quiet = 0; }
+    }
+    calibFill.style.width = `${Math.round(Math.min(calib.peaks.length / 3, 1) * 100)}%`;
+    if (calib.peaks.length >= 3) calibFinish();
+    else if (now - calib.started > 15000) calibFinish();
+  }
+}
+
+function calibFinish() {
+  const { fist, open, peaks } = calib;
+  calib.step = "done";
+  const gap = open - fist;
+  if (!(gap > 0.25)) {
+    calibShow("done", "⚠️", "Your fist and open hand looked too alike, so nothing was changed. Try again with your whole hand in view and good light.", "");
+    calibGo.hidden = false; calibGo.textContent = "Try again"; calib.retry = true;
+    return;
+  }
+  const tuning = {
+    fistBelow: +(fist + 0.32 * gap).toFixed(2),
+    openAbove: +(open - 0.30 * gap).toFixed(2),
+    throwSpeed: peaks.length >= 2 ? +Math.min(Math.max(0.75 * median(peaks), 0.8), 2.2).toFixed(2) : DEFAULT_TUNING.throwSpeed
+  };
+  applyTuning(tuning);
+  try { localStorage.setItem(CALIB_KEY, JSON.stringify(tuning)); } catch {}
+  log(`Tuned: fist < ${tuning.fistBelow}, open > ${tuning.openAbove}, flick ≥ ${tuning.throwSpeed}`);
+  calibShow("done", "✅", peaks.length >= 2 ? "Done. GestureShare now matches your hand." : "Fist and open palm are tuned. We could not measure your flicks, so the standard flick setting stays.", "Done");
+  calibFill.style.width = "100%";
+  playSound("sent");
+}
+
+calibGo.addEventListener("click", () => {
+  if (!calib) return;
+  if (calib.step === "intro" || calib.retry) { calib = { step: "intro" }; calibBegin("fist"); }
+  else if (calib.step === "done") calibClose();
+});
+calibCancel.addEventListener("click", calibClose);
+calibReset.addEventListener("click", () => {
+  applyTuning(DEFAULT_TUNING);
+  try { localStorage.removeItem(CALIB_KEY); } catch {}
+  log("Gesture settings are back to standard");
+  calibClose();
+});
+calibButton.addEventListener("click", calibOpen);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && calib) calibClose(); });
+
+
+
+// ---------------------------------------------------------------------------------------------
+// Settings: use your own connection (pairing) server
+// ---------------------------------------------------------------------------------------------
+const SERVER_KEY = "gestureshare.server";
+const serverInput = document.getElementById("server-input");
+const serverSave = document.getElementById("server-save");
+const serverHint = document.getElementById("server-hint");
+
+// "https://pair.example.com", "pair.example.com", "pair.example.com:9000", "http://192.168.1.5:9000/"
+function parseServer(text) {
+  let t = String(text || "").trim();
+  if (!t) return null;
+  let secure = null;
+  const m = /^(https?):\/\//i.exec(t);
+  if (m) { secure = m[1].toLowerCase() === "https"; t = t.slice(m[0].length); }
+  const slash = t.indexOf("/");
+  let path = "/";
+  if (slash >= 0) { path = t.slice(slash) || "/"; t = t.slice(0, slash); }
+  if (!path.endsWith("/")) path += "/";
+  const [host, portText] = t.split(":");
+  if (!/^[a-z0-9.-]+$/i.test(host || "")) return undefined;
+  let port = portText ? Number(portText) : (secure === false ? 80 : 443);
+  if (!(port > 0 && port < 65536)) return undefined;
+  if (secure === null) secure = !portText || port === 443;
+  return { host: host.toLowerCase(), port, path, secure };
+}
+function showServer() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SERVER_KEY) || "null");
+    serverInput.value = s ? `${s.secure ? "https" : "http"}://${s.host}${(s.secure && s.port === 443) || (!s.secure && s.port === 80) ? "" : ":" + s.port}${s.path && s.path !== "/" ? s.path : ""}` : "";
+  } catch { serverInput.value = ""; }
+}
+showServer();
+serverSave.addEventListener("click", () => {
+  const parsed = parseServer(serverInput.value);
+  if (parsed === undefined) { serverHint.textContent = "That address does not look right. Example: https://pair.example.com"; return; }
+  try {
+    if (parsed) localStorage.setItem(SERVER_KEY, JSON.stringify(parsed)); else localStorage.removeItem(SERVER_KEY);
+  } catch {}
+  serverHint.textContent = "Saved. Reloading…";
+  setTimeout(() => location.reload(), 400);
+});
+
+
+// ---------------------------------------------------------------------------------------------
+// Link with a QR code: this device shows one, and the other device's camera can read it. The
+// camera is already on for gestures, so scanning needs no extra step.
+// ---------------------------------------------------------------------------------------------
+var qrCanvas = document.getElementById("qr-canvas");   // var: renderPairing runs once before this point
+var qrBox = document.getElementById("qr-box");
+var scanHint = document.getElementById("scan-hint");
+const phoneInput = document.getElementById("phone-input");
+const phoneSave = document.getElementById("phone-save");
+const PHONE_KEY = "gestureshare.phone";
+
+function phoneAddress() { try { return localStorage.getItem(PHONE_KEY) || ""; } catch { return ""; } }
+
+// A phone opens the link and is filled in by itself; another GestureShare reads "gestureshare:123456".
+function qrPayload(code) {
+  const phone = phoneAddress();
+  return phone ? `${phone.replace(/#.*$/, "")}#c=${code}` : `gestureshare:${code}`;
+}
+function parseQr(text) {
+  const m = /(?:#c=|gestureshare:)(\d{6})(?!\d)/.exec(String(text || ""));
+  return m ? m[1] : null;
+}
+
+function drawQr(text) {
+  qrBox.hidden = false;
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(text);
+    qr.make();
+    const n = qr.getModuleCount();
+    const quiet = 4;
+    const scale = Math.max(3, Math.floor(qrCanvas.width / (n + quiet * 2)));
+    const size = (n + quiet * 2) * scale;
+    qrCanvas.width = qrCanvas.height = size;
+    const ctx = qrCanvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#000";
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+  } catch { qrBox.hidden = true; }
+}
+
+const scanCanvas = document.createElement("canvas");
+const scanCtx = scanCanvas.getContext("2d", { willReadFrequently: true });
+function scanActive() { return !pairPanel.hidden && (pairingState === "idle" || pairingState === "error") && running && !document.hidden; }
+const lastScan = { code: "", at: 0 };
+function updateScanHint() {
+  if (!scanHint) return;
+  if (pairPanel.hidden || pairingState !== "idle") { scanHint.hidden = true; return; }
+  scanHint.hidden = false;
+  scanHint.textContent = running
+    ? "The camera is looking for a QR code. Show one from the other device."
+    : "Turn on the camera and you can also link by showing a QR code to it.";
+}
+setInterval(() => {
+  updateScanHint();
+  if (!scanActive() || video.readyState < 2 || !video.videoWidth) return;
+  const w = Math.min(480, video.videoWidth);
+  const h = Math.round(w * video.videoHeight / video.videoWidth);
+  scanCanvas.width = w; scanCanvas.height = h;
+  scanCtx.drawImage(video, 0, 0, w, h);
+  let found = null;
+  try { found = jsQR(scanCtx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" }); } catch {}
+  const code = found && parseQr(found.data);
+  if (code && !(code === lastScan.code && Date.now() - lastScan.at < 10000)) {
+    lastScan.code = code; lastScan.at = Date.now();
+    log("Read a QR code: connecting…");
+    link.join(code).catch(() => {});
+  }
+}, 400);
+
+phoneInput.value = phoneAddress();
+phoneSave.addEventListener("click", () => {
+  const v = phoneInput.value.trim();
+  try { if (/^https:\/\/[^\s]+$/i.test(v)) localStorage.setItem(PHONE_KEY, v); else if (!v) localStorage.removeItem(PHONE_KEY); else { phoneInput.value = ""; phoneInput.placeholder = "Must start with https://"; return; } } catch {}
+  phoneSave.textContent = "Saved ✓"; setTimeout(() => { phoneSave.textContent = "Save"; }, 1500);
+});

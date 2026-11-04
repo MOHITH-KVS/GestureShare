@@ -18,8 +18,8 @@
       <span class="cam-state" id="cam-state" data-state="off" role="status">
         <i aria-hidden="true"></i><span id="cam-state-text">Camera off</span>
       </span>
-      <button id="guide-button" class="link-button" type="button">How it works</button>
-      <button id="tab-button" class="link-button" type="button" title="Open GestureShare in a full tab">Open in tab</button>
+      <button id="guide-button" class="help-button" type="button" title="How it works" aria-label="How it works"><span aria-hidden="true">?</span><span class="help-text">How it works</span></button>
+      <button id="tab-button" class="top-button" type="button" title="Open GestureShare in a bigger window (a full tab)"><span aria-hidden="true">⤢</span> Open in tab</button>
       <button id="close-button" class="link-button" type="button">Close</button>
     </header>
 
@@ -79,8 +79,12 @@
 
         <!-- Devices -->
         <section class="devices" id="connect" aria-label="Devices">
+          <div class="devices-head">
+            <h2>Devices</h2>
+            <button id="add-device" class="primary-small" type="button">+ Add device</button>
+          </div>
           <div class="me-row">
-            <span class="me-label">This device is called</span>
+            <span class="me-label">This device:</span>
             <b id="me-name">This device</b>
             <button id="rename-btn" class="link-button" type="button">Rename</button>
             <form id="rename-form" hidden>
@@ -89,58 +93,54 @@
             </form>
           </div>
 
-          <div class="dev-section" id="sec-mine">
-            <div class="dev-head">
-              <b>My devices</b>
-              <span>Your own computers and devices you trust. Their files arrive by themselves.</span>
-            </div>
-            <ul class="device-list" id="list-mine" aria-live="polite"></ul>
-            <p class="devices-empty" id="empty-mine">None yet. Sign into Chrome with the same Google account on your other computer, and it appears here by itself.</p>
+          <!-- Nothing linked yet -->
+          <div class="devices-empty" id="devices-none">
+            <p><b>No other device yet.</b></p>
+            <p>Using the same Google account in Chrome on another computer? It shows up here by itself. Otherwise press <b>+ Add device</b>.</p>
           </div>
 
-          <div class="dev-section" id="sec-other">
-            <div class="dev-head">
-              <b>Other devices</b>
-              <span>A friend’s device, or one you are not sure about. It asks you before any file is accepted.</span>
-            </div>
+          <div class="dev-section" id="sec-mine" hidden>
+            <h3>My devices <small>files arrive by themselves</small></h3>
+            <ul class="device-list" id="list-mine" aria-live="polite"></ul>
+          </div>
+          <div class="dev-section" id="sec-other" hidden>
+            <h3>Other devices <small>they ask you first</small></h3>
             <ul class="device-list" id="list-other" aria-live="polite"></ul>
-            <p class="devices-empty" id="empty-other">None yet.</p>
-            <button id="add-device" class="secondary-button" type="button">+ Link another device with a code</button>
+          </div>
+
+          <!-- Add a device -->
           <div class="pair" id="pair-panel" hidden>
             <div id="connect-idle">
-              <div class="connect-head">
-                <b>Link a device with a code</b>
-                <span>For a friend’s computer, or one that is not on your Chrome account. It will go under “Other devices”.</span>
+              <div class="pair-title"><b>Add a device</b><button id="pair-close" class="link-button" type="button">Close</button></div>
+              <p class="pair-help">Show a code on one device. Type it on the other.</p>
+              <div class="pair-choices" id="pair-choices">
+                <button id="host-btn" type="button"><span>Show a code</span><small>on this device</small></button>
+                <button id="join-open" class="secondary" type="button"><span>Type a code</span><small>from the other device</small></button>
               </div>
-              <ol class="connect-how">
-                <li><b>1.</b> On the first device, press <b>Show my code</b>. A 6-digit number appears.</li>
-                <li><b>2.</b> On the second device, type that number.</li>
-              </ol>
-              <div class="connect-actions">
-                <button id="host-btn" type="button">Show my code</button>
-                <span class="or">or</span>
-                <form id="join-form" autocomplete="off">
-                  <input id="join-input" inputmode="numeric" maxlength="7" placeholder="Type the code from the other device" aria-label="Code from the other device">
-                  <button id="join-btn" class="secondary-button" type="submit">Connect</button>
-                </form>
-              </div>
-              <button id="pair-close" class="link-button" type="button">Close</button>
+              <p class="scan-hint" id="scan-hint" hidden></p>
+              <form id="join-form" autocomplete="off" hidden>
+                <input id="join-input" inputmode="numeric" maxlength="7" placeholder="000 000" aria-label="Code from the other device">
+                <button id="join-btn" type="submit">Connect</button>
+              </form>
             </div>
             <div id="connect-waiting" hidden>
               <span class="connect-label" id="connect-wait-label">Your code</span>
               <div class="code" id="code-display" aria-live="polite">------</div>
-              <p id="connect-wait-text">On the other device, open GestureShare, press “+ Link another device with a code”, and type this number.</p>
+              <div class="qr-box" id="qr-box" hidden>
+                <canvas id="qr-canvas" width="180" height="180" aria-label="QR code for the other device"></canvas>
+                <span class="qr-note">Or show this to the other device’s camera</span>
+              </div>
+              <p id="connect-wait-text">Type this on the other device.</p>
               <button id="cancel-connect" class="link-button" type="button">Cancel</button>
             </div>
             <div id="pair-confirm" hidden role="alert">
               <b id="confirm-title">A device wants to link</b>
-              <p>Only allow it if this is a device you know.</p>
+              <p>Only allow it if you know this device.</p>
               <div class="connect-actions">
                 <button id="confirm-allow" type="button">Allow</button>
                 <button id="confirm-deny" class="secondary-button" type="button">Don’t allow</button>
               </div>
             </div>
-          </div>
           </div>
           <p class="connect-error" id="connect-error" role="alert" hidden></p>
         </section>
@@ -152,6 +152,14 @@
 
         <!-- SEND -->
         <section id="view-send" role="tabpanel" aria-labelledby="tab-send">
+          <div class="fetch-box" id="fetch-box" hidden role="status">
+            <b id="fetch-title">Getting the file…</b>
+            <span id="fetch-text"></span>
+            <div class="fetch-actions" id="fetch-actions" hidden>
+              <button id="fetch-allow" type="button">Allow</button>
+              <button id="fetch-cancel" class="secondary-button" type="button">Cancel</button>
+            </div>
+          </div>
           <div class="filebox" id="filebox">
             <span class="file-icon" aria-hidden="true">📄</span>
             <div class="file-text">
@@ -165,15 +173,18 @@
             <span class="bar"><i id="send-progress-fill"></i></span>
           </div>
           <div class="actions">
-            <button id="choose-file" class="secondary-button" type="button">Choose file</button>
-            <button id="sample-file" class="secondary-button" type="button">Use a sample file</button>
+            <button id="choose-file" class="secondary-button" type="button">Choose files</button>
+            <button id="choose-folder" class="secondary-button" type="button">Choose a folder</button>
           </div>
           <div class="send-to" id="send-to" hidden>
             <span class="send-to-label" id="send-to-label">Send to</span>
             <div class="chips" id="send-to-chips" role="radiogroup" aria-labelledby="send-to-label"></div>
           </div>
           <button id="send-now" type="button" disabled>Send now</button>
-          <input id="file-input" type="file" hidden>
+          <input id="file-input" type="file" multiple hidden>
+          <input id="folder-input" type="file" webkitdirectory hidden>
+
+          <button id="sample-file" class="link-button sample-link" type="button">No file handy? Try a sample file</button>
 
           <ol class="steps" id="send-steps" aria-label="How to send">
             <li data-step="grab">
@@ -226,9 +237,30 @@
         </section>
 
         <details class="advanced">
-          <summary>Gesture readings</summary>
+          <summary>Settings</summary>
+          <label class="setting"><input type="checkbox" id="sound-toggle" checked> Play a sound when a file arrives or is sent</label>
+          <label class="setting"><input type="checkbox" id="bg-toggle" checked> Receive files from My devices even when GestureShare is closed <span class="hint">Chrome itself must be running.</span></label>
+          <div class="setting">
+            <button id="calibrate-btn" class="secondary-button" type="button">Tune gestures to my hand</button>
+            <span class="hint">Takes 15 seconds. Helps if a fist, open palm or flick is hard to trigger.</span>
+          </div>
+          <div class="setting server-setting">
+            <label for="server-input">Connection server</label>
+            <div class="server-row">
+              <input id="server-input" type="text" placeholder="Free default server" autocomplete="off" spellcheck="false" aria-label="Connection server address">
+              <button id="server-save" class="secondary-button" type="button">Save</button>
+            </div>
+            <span class="hint" id="server-hint">Leave empty to use the free server. To use your own, paste its address, like https://pair.example.com</span>
+          </div>
+          <div class="setting server-setting">
+            <label for="phone-input">Phone page address</label>
+            <div class="server-row">
+              <input id="phone-input" type="text" placeholder="Not set" autocomplete="off" spellcheck="false" aria-label="Address of your phone page">
+              <button id="phone-save" class="secondary-button" type="button">Save</button>
+            </div>
+            <span class="hint">After you put the phone page online, paste its address here. The QR code then opens it on a phone, already filled in.</span>
+          </div>
           <p id="debug-ratio">Show your hand to see live numbers.</p>
-          <p class="hint">Use these to tune the thresholds at the top of gestures.js if a gesture is hard to trigger.</p>
         </details>
 
         <div id="permission-help" class="permission-help" role="alert" hidden>
@@ -253,7 +285,7 @@
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.7.1</span>
+      <span>v0.9.1</span>
     </footer>
   </div>
 
@@ -275,7 +307,25 @@
     </div>
   </div>
 
+  <!-- Tune gestures to this person's hand -->
+  <div class="guide" id="calib" hidden role="dialog" aria-modal="true" aria-labelledby="calib-title">
+    <div class="guide-card">
+      <div class="guide-visual" id="calib-visual" aria-hidden="true"></div>
+      <h2 id="calib-title">Tune gestures to my hand</h2>
+      <p class="guide-text" id="calib-text"></p>
+      <div class="progress calib-bar"><span class="bar"><i id="calib-fill"></i></span></div>
+      <div class="guide-nav">
+        <button class="secondary-button" id="calib-cancel" type="button">Cancel</button>
+        <button id="calib-go" type="button">Start</button>
+      </div>
+      <button class="link-button calib-reset" id="calib-reset" type="button">Go back to the standard settings</button>
+    </div>
+  </div>
+
   <script src="vendor/peerjs.min.js"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script src="vendor/jsQR.js"></script>
+  <script src="zip.js"></script>
   <script src="transfer.js"></script>
   <script src="gesture-engine.js"></script>
   <script src="gestures.js"></script>

@@ -20,8 +20,8 @@
       text: "You do this once per device. After that they find each other by themselves.",
       list: [
         "Your own computers: sign into Chrome with the same Google account on each and open GestureShare. They appear under “My devices” by themselves. Nothing to type.",
-        "A friend’s computer: press “+ Link another device with a code”. On one device press “Show my code”, on the other type the 6-digit number, then press “Allow”. It appears under “Other devices” and always asks before accepting a file.",
-        "A device you trust, like your other laptop? Press “Add to My devices” and its files arrive by themselves.",
+        "Anyone else’s device: press “+ Add device”. On one device press “Show a code”. On the other press “Type a code” and enter the number (or just point its camera at the QR code). Then press “Allow”.",
+        "It lands under “Other devices” and asks before accepting a file. Press “Trust” to move a device you know to “My devices”.",
       ],
       listClass: "numbered",
     },
@@ -48,7 +48,7 @@
         "The file saves to your Downloads folder.",
       ],
       listClass: "numbered",
-      or: "Easier: just press the “Accept” button. Files from devices under “My devices” are accepted automatically.",
+      or: "Easier: just press the “Accept” button. Files from “My devices” are accepted automatically.",
     },
     {
       visual: '<span class="gv">☝️</span>',

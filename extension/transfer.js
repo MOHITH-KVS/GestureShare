@@ -68,6 +68,16 @@
   const KEY_PAIR_OLD = "gestureshare.pair";     // the single remembered device of earlier versions
   const KEY_ACCOUNT = "gs.account";             // in chrome.storage.sync
 
+  // The person (or you, before launch) can point GestureShare at their own pairing server.
+  const KEY_SERVER = "gestureshare.server";
+  function storedServer() {
+    try {
+      const s = JSON.parse(root.localStorage.getItem(KEY_SERVER) || "null");
+      if (s && typeof s.host === "string" && s.host && Number(s.port) > 0) return { host: s.host, port: Number(s.port), path: s.path || "/", secure: !!s.secure };
+    } catch { /* nothing saved */ }
+    return null;
+  }
+
   const noop = () => {};
   const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
   const randomHex = n => hex(crypto.getRandomValues(new Uint8Array(n)));
@@ -120,7 +130,7 @@
   class GestureLink {
     constructor(options = {}) {
       const test = root.GESTURE_LINK_CONFIG || {};
-      this.signal = options.signal || test.signaling || SIGNALING;
+      this.signal = options.signal || test.signaling || storedServer() || SIGNALING;
       this.iceServers = options.iceServers || test.iceServers;
       this.accountStore = "accountStore" in test ? test.accountStore : chromeAccountStore();
       this.cb = {
@@ -203,7 +213,9 @@
     async start() {
       this.stopped = false;
       this._emitDevices();
-      await this._startPresence();
+      let ready = await this._startPresence();
+      // The background page may have only just let go of this device's id: try again a few times.
+      for (let i = 0; i < 4 && !ready && !this.presence && !this.stopped; i++) { await new Promise(r => setTimeout(r, 2000)); ready = await this._startPresence(); }
       this._syncAccount().catch(noop);
       if (this.accountStore && this.accountStore.onChange) this.accountStore.onChange(value => this._syncAccount(value).catch(noop));
       this._redialAll();
@@ -346,6 +358,7 @@
 
     _redialAll() {
       if (this.stopped) return;
+      if (!this.presence) this._startPresence().catch(noop);       // e.g. the background receiver was still holding our id
       for (const d of this.devices.values()) if (!d.stale) this._dialDevice(d).catch(noop);
     }
 
@@ -637,15 +650,15 @@
     // ---- sending -----------------------------------------------------------------------------
 
     /** Offer a File to a device (default: the chosen one) and send it once they accept. */
-    sendFile(file, toId) {
+    sendFile(file, toId, batch) {
       const id = toId || this.target();
       const s = id && this.sessions.get(id);
       if (!s) throw new Error("No device connected.");
       if (s.outgoing) throw new Error("Another file is still being sent.");
-      return this._sendFile(s, file);
+      return this._sendFile(s, file, batch);
     }
 
-    async _sendFile(s, file) {
+    async _sendFile(s, file, batch) {
       const id = randomHex(4);
       const out = { id, file, ack: null, timer: null };
       s.outgoing = out;
@@ -659,7 +672,7 @@
           out.timer = setTimeout(() => reject(Object.assign(new Error("not caught in time"), { kind: "expired" })), OFFER_TIMEOUT_MS);
         });
         answer.catch(noop);
-        this._send(s, { t: "offer", id, name: cleanName(file.name), size: file.size, mime: file.type || "" });
+        this._send(s, { t: "offer", id, name: cleanName(file.name), size: file.size, mime: file.type || "", batch: batch ? { id: String(batch.id), i: batch.i, n: batch.n } : undefined });
         state("waiting");
         await answer;
         clearTimeout(out.timer);
@@ -740,18 +753,19 @@
       const inc = s && s.incoming;
       if (!inc || inc.accepted) return false;
       inc.accepted = true;
+      if (inc.batch) s.batchOk = inc.batch.id;           // one yes covers the whole batch of files
       try { this._send(s, { t: "accept", id }); } catch { return false; }
       this.cb.progress("receive", id, 0, inc.size);
       return true;
     }
 
     /** Say no (or stop receiving). */
-    reject(id) {
+    reject(id, reason) {
       const s = this._sessionOfOffer(id);
       const inc = s && s.incoming;
       if (!inc) return;
       s.incoming = null;
-      try { this._send(s, inc.accepted ? { t: "cancel", id } : { t: "decline", id, reason: "declined" }); } catch {}
+      try { this._send(s, inc.accepted ? { t: "cancel", id } : { t: "decline", id, reason: reason || "declined" }); } catch {}
     }
 
     _onData(s, data) {
@@ -782,9 +796,12 @@
             try { this._send(s, { t: "decline", id: msg.id, reason: "busy" }); } catch {}
             return;
           }
-          s.incoming = { id: msg.id, name: cleanName(msg.name), size: Number(msg.size) || 0, mime: msg.mime || "", chunks: [], got: 0, accepted: false };
-          const auto = s.dev.auto === true;
-          this.cb.offer({ id: msg.id, from: { id: s.dev.id, name: s.dev.name }, name: s.incoming.name, size: s.incoming.size, mime: s.incoming.mime, auto });
+          const b = msg.batch && typeof msg.batch.id === "string" && Number.isInteger(msg.batch.i) && Number.isInteger(msg.batch.n) && msg.batch.n > 1 && msg.batch.n <= 10000
+            ? { id: msg.batch.id.slice(0, 40), i: msg.batch.i, n: msg.batch.n } : null;
+          if (!b || b.i === 0) s.batchOk = null;
+          s.incoming = { id: msg.id, name: cleanName(msg.name), size: Number(msg.size) || 0, mime: msg.mime || "", chunks: [], got: 0, accepted: false, batch: b };
+          const auto = s.dev.auto === true || (!!b && s.batchOk === b.id);
+          this.cb.offer({ id: msg.id, from: { id: s.dev.id, name: s.dev.name }, name: s.incoming.name, size: s.incoming.size, mime: s.incoming.mime, auto, batch: b });
           if (auto) this.accept(msg.id);
           break;
         }
@@ -793,7 +810,7 @@
           break;
         case "decline":
           if (s.outgoing && s.outgoing.id === msg.id && s.outgoing.rejectAnswer) {
-            s.outgoing.rejectAnswer(Object.assign(new Error(msg.reason === "busy" ? "the other device is busy with another file" : "declined"), { kind: "declined" }));
+            s.outgoing.rejectAnswer(Object.assign(new Error(msg.reason === "busy" ? "the other device is busy with another file" : msg.reason === "asleep" ? "GestureShare is closed on the other device. Open it there, or add this device to its My devices" : "declined"), { kind: "declined" }));
           }
           break;
         case "done": {
@@ -804,7 +821,8 @@
           s.incoming = null;
           if (ok) {
             this.cb.progress("receive", inc.id, inc.size, inc.size);
-            this.cb.received({ id: inc.id, name: inc.name, size: inc.size, from: { id: s.dev.id, name: s.dev.name } }, new Blob(inc.chunks, { type: inc.mime }));
+            if (inc.batch && inc.batch.i >= inc.batch.n - 1) s.batchOk = null;
+            this.cb.received({ id: inc.id, name: inc.name, size: inc.size, batch: inc.batch, from: { id: s.dev.id, name: s.dev.name } }, new Blob(inc.chunks, { type: inc.mime }));
           } else {
             this.cb.offerGone(inc.id, "the file arrived incomplete");
           }
