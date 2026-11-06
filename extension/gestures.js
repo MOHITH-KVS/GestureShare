@@ -325,6 +325,8 @@ const link = new GestureLink({
     const [box, text, fill] = direction === "send"
       ? [sendProgress, sendProgressText, sendProgressFill]
       : [recvProgress, recvProgressText, recvProgressFill];
+    xferShow(direction === "send" ? "send" : "receive", direction === "send" ? `Sending to ${outgoingTo || "device"}` : "Receiving…",
+      direction === "send" ? outgoingName : (receiving ? receiving.name : ""), Math.round((bytes / total) * 100));
     box.hidden = false;
     box.dataset.done = "false";
     text.textContent = `${direction === "send" ? "Sending" : "Receiving"}  ${fmtSize(bytes)} of ${fmtSize(total)}`;
@@ -332,6 +334,8 @@ const link = new GestureLink({
   },
   onReceived: (offer, blob) => {
     receiving = null;
+    burstAt(engine.palm || { x: .5, y: .5 }, "#3ef08a");
+    xferDone("Received", offer.name);
     saveBlob(blob, offer.name);
     showProgressDone(recvProgress, recvProgressText, recvProgressFill, "Saved to your Downloads folder");
     renderIncoming();
@@ -343,6 +347,7 @@ const link = new GestureLink({
   onSendState: (id, state, detail) => {
     switch (state) {
       case "waiting":
+        xferShow("send", `Waiting for ${outgoingTo || "the other device"}…`, outgoingName, 0);
         sendProgress.hidden = false; sendProgress.dataset.done = "false";
         sendProgressText.textContent = `Waiting for ${outgoingTo || "the other device"} to accept ${outgoingName}…`;
         sendProgressFill.style.width = "0%";
@@ -358,24 +363,28 @@ const link = new GestureLink({
           break;
         }
         queue = null;
+        xferDone("Delivered", outgoingName);
         showProgressDone(sendProgress, sendProgressText, sendProgressFill, `Delivered ✓  ${outgoingName}`);
         showBanner(`Delivered ✓  ${outgoingName}`, "ok", 2600);
         log(`Delivered ${outgoingName}`);
         playSound("sent");
         break;
       case "declined":
+        xferHide();
         queue = null;
         hideProgress(sendProgress);
         showBanner("They declined the file", "warn", 2600);
         log(`${outgoingName} was declined`);
         break;
       case "expired":
+        xferHide();
         queue = null;
         hideProgress(sendProgress);
         showBanner("Nobody caught it in time", "warn", 2600);
         log(`${outgoingName} expired: not caught within a minute`);
         break;
       case "failed":
+        xferHide();
         queue = null;
         hideProgress(sendProgress);
         playSound("error");
@@ -660,6 +669,45 @@ function hideHelp() {
   allowButton.hidden = true;
 }
 
+// Ring on the camera while a file is on its way. dir: "send" | "receive"
+const xferEl = document.getElementById("xfer"), xferRing = document.getElementById("xfer-ring");
+const xferTitle = document.getElementById("xfer-title"), xferSub = document.getElementById("xfer-sub"), xferIcon = document.getElementById("xfer-icon");
+let xferHideTimer = null;
+function xferShow(dir, title, sub, pct) {
+  clearTimeout(xferHideTimer);
+  const me = "You", other = dir === "send" ? (outgoingTo || "Device") : ((receiving && receiving.from && (receiving.from.name || receiving.from)) || "Device");
+  document.getElementById("flow-a").textContent = dir === "send" ? me : other;
+  document.getElementById("flow-b").textContent = dir === "send" ? other : me;
+  xferEl.hidden = false; xferEl.dataset.dir = dir; xferEl.dataset.done = "false";
+  xferIcon.textContent = dir === "send" ? "📤" : "📥";
+  xferTitle.textContent = title; xferSub.textContent = sub || "";
+  if (pct !== undefined) xferRing.style.setProperty("--p", pct);
+}
+function xferDone(title, sub) {
+  clearTimeout(xferHideTimer);
+  xferEl.hidden = false; xferEl.dataset.done = "true";
+  xferTitle.textContent = title; xferSub.textContent = sub || "";
+  confettiBurst();
+  try { navigator.vibrate && navigator.vibrate(60); } catch {}
+  xferHideTimer = setTimeout(() => { xferEl.hidden = true; }, 2600);
+}
+function confettiBurst() {
+  const box = document.getElementById("confetti");
+  box.replaceChildren();
+  const colors = ["#34d399", "#5b9bff", "#ffd84a", "#f472b6", "#a78bfa"];
+  for (let i = 0; i < 22; i++) {
+    const s = document.createElement("s");
+    const a = Math.random() * Math.PI * 2, r = 50 + Math.random() * 60;
+    s.style.background = colors[i % colors.length];
+    s.style.setProperty("--dx", `${Math.cos(a) * r}px`);
+    s.style.setProperty("--dy", `${Math.sin(a) * r}px`);
+    s.style.setProperty("--rot", `${Math.round(Math.random() * 540 - 270)}deg`);
+    box.append(s);
+  }
+  setTimeout(() => box.replaceChildren(), 1100);
+}
+function xferHide() { clearTimeout(xferHideTimer); xferEl.hidden = true; }
+
 // Big message in the middle of the camera. kind: "info" | "ok" | "warn"
 function showBanner(text, kind = "info", ms = 1400) {
   banner.textContent = text;
@@ -901,6 +949,7 @@ function flyHeldChip(direction) {
   const far = { left: ["-240px", "0px"], right: ["240px", "0px"], up: ["0px", "-240px"], down: ["0px", "240px"] }[direction];
   heldChip.style.setProperty("--fly-x", far[0]);
   heldChip.style.setProperty("--fly-y", far[1]);
+  heldChip.style.setProperty("--fly-spin", direction === "left" || direction === "up" ? "-540deg" : "540deg");
   heldChip.style.setProperty("--fly-rot", direction === "left" ? "-18deg" : direction === "right" ? "18deg" : "0deg");
   heldChip.classList.add("fly");
   setTimeout(hideHeldChip, 600);   // also covers "reduce motion", where the animation does not run
@@ -909,6 +958,7 @@ function flyHeldChip(direction) {
 function onGesture(event) {
   switch (event.type) {
     case "grab":
+      burstAt(engine.palm, "#ffd84a");
       showHeldChip();
       showBanner("Picked up ✊  now flick to send", "info", 1800);
       log(`Picked up ${stagedFile ? stagedFile.name : "file"}`);
@@ -920,6 +970,7 @@ function onGesture(event) {
 
     case "throw": {
       const file = stagedFile;
+      burstAt(engine.palm, "#ffd84a", event.direction);
       flyHeldChip(event.direction);
       throwCount++;
       if (file) onThrow(file, event.direction);
@@ -939,6 +990,7 @@ function onGesture(event) {
       break;
 
     case "catch":
+      burstAt(engine.palm, "#3ef08a");
       catchIncoming("open palm");
       break;
   }
@@ -1058,25 +1110,63 @@ const TARGETS = { grab: "Hold to pick up", catch: "Hold to catch", throw: "Flick
 
 // Exactly one gesture is shown at a time, and the bar only appears when that gesture is about to
 // DO something (pick up, send, catch). A pinch or an in-between hand never shows a bar.
+let palmNoticeShown = false;
 function showGesture() {
-  const [icon, label] = POSES[engine.pose] || POSES.other;
-  gesturePill.hidden = false;
-  gesturePill.dataset.pose = engine.pose;
+  const pose = engine.pose;
+  const shown = pose === "fist" || pose === "open";          // nothing is said about any other hand shape
+  gesturePill.hidden = !shown;
+  if (!shown) { palmNoticeShown = false; holdBar.hidden = true; hideIncomingChip(); return; }
+
+  let icon, label, state = "ok";
+  if (pose === "fist") {
+    icon = "✊";
+    if (stagedFile && tab === "send") label = "Pick up your file";
+    else { label = "Choose a file first"; state = "none"; }
+  } else {
+    icon = "✋";
+    if (incoming) label = "Collect your file";
+    else { label = "No file for you yet"; state = "none"; }
+  }
+  gesturePill.dataset.pose = pose;
+  gesturePill.dataset.state = state;
   if (gestureIcon.textContent !== icon) gestureIcon.textContent = icon;
   if (gestureLabel.textContent !== label) gestureLabel.textContent = label;
+
+  // Open palm with nothing to collect: say so once, like "Choose a file first" for the fist.
+  if (pose === "open") {
+    if (!incoming && !receiving && !palmNoticeShown) { palmNoticeShown = true; showBanner("No file has been sent to you yet", "info", 1800); }
+  } else palmNoticeShown = false;
 
   if (engine.target) {
     holdBar.hidden = false;
     holdBar.dataset.target = engine.target;
-    if (holdLabel.textContent !== TARGETS[engine.target]) holdLabel.textContent = TARGETS[engine.target];
+    const text = engine.target === "catch" ? "Hold to collect" : TARGETS[engine.target];
+    if (holdLabel.textContent !== text) holdLabel.textContent = text;
     holdFill.style.width = `${Math.round(engine.progress * 100)}%`;
   } else {
     holdBar.hidden = true;
   }
+  moveIncomingChip();
+}
+
+// The incoming file drifts down into your palm while you hold it open.
+const incomingChipEl = document.getElementById("incoming-chip");
+function hideIncomingChip() { incomingChipEl.hidden = true; }
+function moveIncomingChip() {
+  if (!(engine.pose === "open" && incoming && engine.palm)) { hideIncomingChip(); return; }
+  document.getElementById("incoming-chip-name").textContent = incoming.name;
+  incomingChipEl.hidden = false;
+  const p = Math.min(1, engine.progress || 0);
+  const x = (1 - engine.palm.x) * 100, y = engine.palm.y * 100;
+  incomingChipEl.style.left = `${x.toFixed(1)}%`;
+  incomingChipEl.style.top = `${(y - (1 - p) * 28).toFixed(1)}%`;
+  incomingChipEl.style.setProperty("--tx", `${(1 - p) * 35}deg`);
+  incomingChipEl.style.opacity = String(.55 + .45 * p);
+  incomingChipEl.style.transform = `translate(-50%, -50%) scale(${(1.1 - .3 * p).toFixed(2)}) rotateX(${(1 - p) * 35}deg)`;
 }
 
 function resetIndicators() {
-  gesturePill.hidden = true;
+  gesturePill.hidden = true; hideIncomingChip(); palmNoticeShown = false;
   twoHandsEl.hidden = true;
   holdBar.hidden = true;
   holdFill.style.width = "0%";
@@ -1286,41 +1376,87 @@ const connections = [
   [0, 17], [5, 9], [9, 13], [13, 17]
 ];
 
+// ---- Neon look (after the HandConnect reference): glowing line with a white core, plus sparks ----
+let sparks = [];
+function addSpark(x, y, color, power = 6, dx = 0, dy = 0) {
+  sparks.push({ x, y, life: 1, c: color, vx: (Math.random() - .5) * power + dx, vy: (Math.random() - .5) * power + dy });
+  if (sparks.length > 240) sparks.shift();
+}
+function drawSparks() {
+  sparks = sparks.filter(s => (s.life -= 0.04) > 0);
+  ctx.lineWidth = 2; ctx.lineCap = "round";
+  for (const s of sparks) {
+    s.x += s.vx; s.y += s.vy;
+    ctx.globalAlpha = s.life; ctx.strokeStyle = s.c;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx * 2, s.y - s.vy * 2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function neonLine(ax, ay, bx, by, color, width) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.shadowColor = color; ctx.shadowBlur = 16;
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = width / 3; ctx.shadowBlur = 0;
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+}
+// Burst of sparks from the palm when a file is sent or caught.
+function burstAt(palm, color, dir) {
+  if (!palm) return;
+  const x = palm.x * canvas.width, y = palm.y * canvas.height;
+  const d = { left: [-5, 0], right: [5, 0], up: [0, -5], down: [0, 5] }[dir] || [0, 0];
+  for (let i = 0; i < 46; i++) addSpark(x, y, i % 3 ? color : "#fff", 9, d[0] * (dir ? -1 : 0), d[1] * (dir ? -1 : 0));
+}
+
 function drawHand(landmarks, forceColour, keep = false) {
   if (!keep) ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // The skeleton changes colour with the gesture, so you can see what the app thinks you are doing.
-  const colour = forceColour || engine.state === "holding" ? "#fbbf24" : engine.pose === "open" ? "#34d399" : "#4f8cff";
-
-  // Draw connecting lines first.
-  ctx.lineWidth = Math.max(2, canvas.width / 180);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = colour;
+  const now = performance.now();
+  const W = canvas.width, H = canvas.height;
+  const holding = engine.state === "holding";
+  const catching = engine.pose === "open" && !!incoming;
+  // Colour tells what the app thinks you are doing: amber = file in hand, green = ready to collect.
+  const colour = forceColour || (holding ? "#ffd84a" : catching ? "#3ef08a" : engine.pose === "open" ? "#7dd3fc" : "#5b9bff");
+  const width = Math.max(3, W / 150);
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
 
   for (const [start, end] of connections) {
-    const a = landmarks[start];
-    const b = landmarks[end];
+    const a = landmarks[start], b = landmarks[end];
+    neonLine(a.x * W, a.y * H, b.x * W, b.y * H, colour, width);
+  }
+  ctx.shadowBlur = 0;
 
-    ctx.beginPath();
-    ctx.moveTo(a.x * canvas.width, a.y * canvas.height);
-    ctx.lineTo(b.x * canvas.width, b.y * canvas.height);
-    ctx.stroke();
+  // Fingertip sparks while something is happening
+  const rate = holding || catching ? 0.3 : 0.02;
+  for (const i of [4, 8, 12, 16, 20]) {
+    const p = landmarks[i];
+    if (Math.random() < rate) addSpark(p.x * W, p.y * H, colour);
   }
 
-  // Draw clearly visible joints.
+  // Palm aura: pulses around a held file, ripples outward while waiting to collect
+  const pm = engine.palm;
+  if (pm && (holding || catching)) {
+    const cx = pm.x * W, cy = pm.y * H, base = Math.max(24, W / 9);
+    ctx.lineWidth = 3; ctx.strokeStyle = colour; ctx.shadowColor = colour; ctx.shadowBlur = 14;
+    if (holding) {
+      ctx.globalAlpha = .6 + .3 * Math.sin(now / 120);
+      ctx.beginPath(); ctx.arc(cx, cy, base * (1 + .08 * Math.sin(now / 120)), 0, Math.PI * 2); ctx.stroke();
+    } else {
+      for (let k = 0; k < 3; k++) {
+        const t = ((now / 1400) + k / 3) % 1;
+        ctx.globalAlpha = (1 - t) * .8;
+        ctx.beginPath(); ctx.arc(cx, cy, base * (0.6 + t * 1.6), 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  }
+
+  // Joints
   for (let i = 0; i < landmarks.length; i++) {
     const point = landmarks[i];
-    const radius = [4, 8, 12, 16, 20].includes(i) ? 5 : 3.5;
-
+    const tip = [4, 8, 12, 16, 20].includes(i);
     ctx.beginPath();
-    ctx.arc(point.x * canvas.width, point.y * canvas.height, radius, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#2563eb";
-    ctx.stroke();
+    ctx.arc(point.x * W, point.y * H, tip ? 5 : 3, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
   }
+  drawSparks();
 }
 
 // Decides which of MediaPipe's hands are real, and returns the one to follow (or null for "no hand").
@@ -1408,8 +1544,18 @@ function moveHeldChip() {
     return;
   }
   if (heldChip.hidden) showHeldChip();
-  heldChip.style.left = `${((1 - engine.palm.x) * 100).toFixed(1)}%`;
-  heldChip.style.top = `${(engine.palm.y * 100).toFixed(1)}%`;
+  const px = (1 - engine.palm.x) * 100, py = engine.palm.y * 100;
+  // Tilt the card in the direction the hand moves, like a card held in the air.
+  if (moveHeldChip.lx !== undefined) {
+    const dx = px - moveHeldChip.lx, dy = py - moveHeldChip.ly;
+    const clamp = (v, m) => Math.max(-m, Math.min(m, v));
+    heldChip.style.setProperty("--ty", `${clamp(dx * 6, 40)}deg`);
+    heldChip.style.setProperty("--tx", `${clamp(-dy * 6, 30)}deg`);
+    heldChip.style.setProperty("--tz", `${clamp(dx * 2, 12)}deg`);
+  }
+  moveHeldChip.lx = px; moveHeldChip.ly = py;
+  heldChip.style.left = `${px.toFixed(1)}%`;
+  heldChip.style.top = `${py.toFixed(1)}%`;
 }
 
 // Handles one frame (a hand, or null). Kept separate from the camera loop so it can be tested.

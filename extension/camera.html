@@ -47,6 +47,27 @@
             <span class="hold-track"><span class="hold-fill" id="hold-fill"></span></span>
           </div>
 
+          <!-- A file floating down into your open palm while you hold it to collect -->
+          <div class="held-chip incoming-chip" id="incoming-chip" hidden aria-hidden="true">
+            <span class="held-icon">📥</span><span id="incoming-chip-name">file</span>
+          </div>
+
+          <!-- Sending / receiving: a ring that fills up -->
+          <div class="xfer" id="xfer" data-dir="send" hidden role="status" aria-live="polite">
+            <div class="xfer-ring" id="xfer-ring">
+              <span class="xfer-icon" id="xfer-icon">📄</span>
+              <svg class="xfer-check" viewBox="0 0 52 52" aria-hidden="true"><path d="M14 27 l8 8 l16 -18"/></svg>
+              <span class="confetti" id="confetti" aria-hidden="true"></span>
+            </div>
+            <div class="xfer-flow" id="xfer-flow" aria-hidden="true">
+              <span class="flow-dev"><b>💻</b><small id="flow-a">You</small></span>
+              <span class="flow-lane"><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="flow-dev"><b>💻</b><small id="flow-b">Device</small></span>
+            </div>
+            <b class="xfer-title" id="xfer-title">Sending…</b>
+            <span class="xfer-sub" id="xfer-sub"></span>
+          </div>
+
           <!-- Big message in the middle of the camera: Picked up / Sent / Caught -->
           <div class="banner" id="banner" data-kind="info" hidden role="status"></div>
 
@@ -285,7 +306,7 @@
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.9.2</span>
+      <span>v0.9.4</span>
     </footer>
   </div>
 

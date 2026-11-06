@@ -55,6 +55,7 @@
     pinchOn: 0.30,          // thumb-to-index distance / hand size below this = pinch starts
     pinchOff: 0.45,         // ...and ends above this (hysteresis)
     pinchOthersMin: 1.35,   // a pinch needs the other three fingers out (a fist is not a pinch)
+    openMinPinch: 0.55,     // an open palm has a wide gap between thumb and index; a pinch is never "open"
     pinchFrames: 2          // frames in a row before a pinch starts or ends
   };
 
@@ -192,7 +193,7 @@
       let next = this.pose;
       if (this.pinching) next = "pinch";
       else if (this.openness < o.fistBelow) next = "fist";
-      else if (this.openness > o.openAbove) next = this.minTip >= o.openMinTip ? "open" : "other";
+      else if (this.openness > o.openAbove) next = (this.minTip >= o.openMinTip && this.pinchRatio >= o.openMinPinch) ? "open" : "other";
       else if (this.pose === "pinch") next = "other";
       if (next !== this.pose) {
         this.pose = next;
