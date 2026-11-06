@@ -514,3 +514,18 @@ html[data-mode="tab"] #tab-button { display: none; }
 .fetch-actions { display: flex; gap: 8px; }
 .fetch-actions[hidden] { display: none; }
 #fetch-allow { padding: 8px 16px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 650; }
+
+/* Turn-off button sits on the camera picture, always in view */
+.cam-off { position:absolute; top:8px; right:8px; z-index:5; display:inline-flex; gap:6px; align-items:center;
+  padding:6px 12px; border-radius:999px; border:1px solid rgba(255,255,255,.35); background:rgba(10,14,24,.72);
+  color:#fff; font:600 13px/1 inherit; font-family:inherit; cursor:pointer; backdrop-filter:blur(4px); }
+.cam-off:hover { background:rgba(200,40,40,.85); }
+.cam-off:disabled { display:none; }
+/* My devices | Others switch */
+.dev-tabs { display:flex; gap:4px; padding:4px; border-radius:12px; background:var(--surface-2); margin:10px 0 6px; }
+.dev-tab { flex:1; padding:9px 8px; border:0; border-radius:9px; background:transparent; color:inherit; font:600 14px/1.2 inherit; font-family:inherit; cursor:pointer; }
+.dev-tab[aria-selected="true"] { background:var(--accent); color:#fff; }
+.dev-tab[aria-selected="false"] { color:var(--muted); }
+.dev-tab .count { display:inline-block; min-width:18px; padding:1px 6px; margin-left:4px; border-radius:999px; background:rgba(127,127,127,.25); font-size:12px; }
+.tab-hint { margin:4px 2px 8px; font-size:13px; opacity:.75; }
+.add-wide { width:100%; margin-top:8px; }

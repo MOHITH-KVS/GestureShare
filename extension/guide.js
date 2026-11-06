@@ -19,9 +19,9 @@
       title: "Step 1: Link your devices",
       text: "You do this once per device. After that they find each other by themselves.",
       list: [
-        "Your own computers: sign into Chrome with the same Google account on each and open GestureShare. They appear under “My devices” by themselves. Nothing to type.",
-        "Anyone else’s device: press “+ Add device”. On one device press “Show a code”. On the other press “Type a code” and enter the number (or just point its camera at the QR code). Then press “Allow”.",
-        "It lands under “Other devices” and asks before accepting a file. Press “Trust” to move a device you know to “My devices”.",
+        "Your own computers: sign into Chrome with the same Google account on each and open GestureShare. They appear in the “My devices” tab by themselves. Nothing to type.",
+        "Anyone else’s device: open the “Others” tab and press “+ Add someone else’s device”. On one device press “Show a code”. On the other press “Type a code” and enter the number (or just point its camera at the QR code). Then press “Allow”.",
+        "Others always ask before accepting a file. Press “Trust” on a device you know to move it to “My devices”. You only add a device once.",
       ],
       listClass: "numbered",
     },

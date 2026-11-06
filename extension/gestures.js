@@ -278,7 +278,9 @@ const link = new GestureLink({
       receiving = null; hideProgress(recvProgress); hideProgress(sendProgress);
       renderIncoming();
     }
-    else if (event.type === "paired") { showBanner(`Linked with ${who} ✓`, "ok", 2200); log(`Linked with ${who}`); }
+    else if (event.type === "paired") {
+      if (pairTrust !== null && event.device) { link.setAuto(event.device.id, pairTrust); devTab = pairTrust ? "mine" : "other"; pairTrust = null; }
+      showBanner(`Linked with ${who} ✓`, "ok", 2200); log(`Linked with ${who}`); }
     else if (event.type === "refused" && event.message) log(event.message);
     updateCoach();
   },
@@ -492,6 +494,7 @@ function deviceRow(d, mine) {
   return li;
 }
 
+let pairTrust = null;   // true = the device being added is mine
 function renderDevices(list) {
   devices = list;
   meName.textContent = link.name;
@@ -500,14 +503,34 @@ function renderDevices(list) {
   const other = list.filter(d => !(d.auto === true && !d.stale));
   listMine.replaceChildren(...mine.map(d => deviceRow(d, true)));
   listOther.replaceChildren(...other.map(d => deviceRow(d, false)));
-  secMine.hidden = mine.length === 0;
-  secOther.hidden = other.length === 0;
-  devicesNone.hidden = list.length > 0;
+  document.getElementById("count-mine").textContent = mine.length;
+  document.getElementById("count-other").textContent = other.length;
+  applyDevTab(mine.length, other.length);
   renderSendTo();
   renderIncoming();
   demoBox.hidden = online.length > 0;
   updateCoach();
 }
+
+// My devices | Others switch. "Add" uses the trust level of the tab you are on.
+let devTab = "mine";
+function applyDevTab(nMine, nOther) {
+  const isMine = devTab === "mine";
+  document.getElementById("tab-mine").setAttribute("aria-selected", String(isMine));
+  document.getElementById("tab-other").setAttribute("aria-selected", String(!isMine));
+  secMine.hidden = !isMine || nMine === 0;
+  secOther.hidden = isMine || nOther === 0;
+  devicesNone.hidden = (isMine ? nMine : nOther) > 0;
+  document.getElementById("devices-none-text").textContent = isMine
+    ? "None yet. Same Google account in Chrome on another computer? It appears here by itself."
+    : "None yet. Add a friend's device or any phone or computer you don't own.";
+  document.getElementById("tab-hint").textContent = isMine
+    ? "Your own devices. Files arrive by themselves."
+    : "Friends and other people. They are asked before anything is received.";
+  addDeviceButton.textContent = isMine ? "+ Add my device" : "+ Add someone else's device";
+}
+document.getElementById("tab-mine").addEventListener("click", () => { devTab = "mine"; renderDevices(devices); });
+document.getElementById("tab-other").addEventListener("click", () => { devTab = "other"; renderDevices(devices); });
 
 // "Send to": nothing to choose with one device, a row of buttons with more.
 function renderSendTo() {
@@ -562,7 +585,7 @@ function renderPairing(state, info = {}) {
 }
 
 joinOpen.addEventListener("click", () => { pairChoices.hidden = true; joinForm.hidden = false; joinInput.focus(); });
-addDeviceButton.addEventListener("click", () => { pairOpen = true; renderPairing(pairingState, {}); });
+addDeviceButton.addEventListener("click", () => { pairTrust = devTab === "mine"; pairOpen = true; renderPairing(pairingState, {}); });
 pairClose.addEventListener("click", () => { pairOpen = false; link.cancelPairing(); renderPairing("idle", {}); });
 hostButton.addEventListener("click", () => { link.host().catch(() => {}); });
 sendNowButton.addEventListener("click", () => { if (stagedFile) onThrow(stagedFile, null); });
@@ -1028,7 +1051,7 @@ video.addEventListener("resize", sizeToVideo);
 const POSES = {
   fist: ["✊", "Fist"],
   open: ["✋", "Open palm"],
-  pinch: ["🤏", "Pinch"],
+  pinch: ["🖐️", "Hand"],
   other: ["🖐️", "Hand"]
 };
 const TARGETS = { grab: "Hold to pick up", catch: "Hold to catch", throw: "Flick to send" };
@@ -1916,7 +1939,14 @@ function phoneAddress() { try { return localStorage.getItem(PHONE_KEY) || ""; } 
 // A phone opens the link and is filled in by itself; another GestureShare reads "gestureshare:123456".
 function qrPayload(code) {
   const phone = phoneAddress();
-  return phone ? `${phone.replace(/#.*$/, "")}#c=${code}` : `gestureshare:${code}`;
+  if (!phone) return `gestureshare:${code}`;
+  // If this computer uses its own pairing server, the phone must use the same one.
+  let server = "";
+  try {
+    const s = JSON.parse(localStorage.getItem("gestureshare.server") || "null");
+    if (s && s.host) server = `${s.secure ? "https" : "http"}://${s.host}${(s.secure && s.port === 443) || (!s.secure && s.port === 80) ? "" : ":" + s.port}${s.path && s.path !== "/" ? s.path : ""}`;
+  } catch {}
+  return `${phone.replace(/#.*$/, "")}#c=${code}${server ? "&s=" + encodeURIComponent(server) : ""}`;
 }
 function parseQr(text) {
   const m = /(?:#c=|gestureshare:)(\d{6})(?!\d)/.exec(String(text || ""));

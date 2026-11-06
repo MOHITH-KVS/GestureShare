@@ -29,6 +29,7 @@
         <div class="camera-frame" id="camera-frame">
           <video id="camera" autoplay playsinline muted></video>
           <canvas id="hand-canvas" width="640" height="480" aria-hidden="true"></canvas>
+          <button id="camera-stop" class="cam-off" type="button" disabled title="Turn the camera off"><span aria-hidden="true">⏻</span> Turn off</button>
 
           <!-- The file in your hand: follows your palm while you hold a fist -->
           <div class="held-chip" id="held-chip" hidden aria-hidden="true">
@@ -81,7 +82,6 @@
         <section class="devices" id="connect" aria-label="Devices">
           <div class="devices-head">
             <h2>Devices</h2>
-            <button id="add-device" class="primary-small" type="button">+ Add device</button>
           </div>
           <div class="me-row">
             <span class="me-label">This device:</span>
@@ -94,19 +94,23 @@
           </div>
 
           <!-- Nothing linked yet -->
-          <div class="devices-empty" id="devices-none">
-            <p><b>No other device yet.</b></p>
-            <p>Using the same Google account in Chrome on another computer? It shows up here by itself. Otherwise press <b>+ Add device</b>.</p>
+          <div class="dev-tabs" role="tablist" aria-label="Which devices">
+            <button id="tab-mine" class="dev-tab" role="tab" type="button" aria-selected="true">My devices <span class="count" id="count-mine">0</span></button>
+            <button id="tab-other" class="dev-tab" role="tab" type="button" aria-selected="false">Others <span class="count" id="count-other">0</span></button>
           </div>
+          <p class="tab-hint" id="tab-hint"></p>
+          <div class="devices-empty" id="devices-none"><p id="devices-none-text">Nothing here yet.</p></div>
 
           <div class="dev-section" id="sec-mine" hidden>
-            <h3>My devices <small>files arrive by themselves</small></h3>
+            
             <ul class="device-list" id="list-mine" aria-live="polite"></ul>
           </div>
           <div class="dev-section" id="sec-other" hidden>
-            <h3>Other devices <small>they ask you first</small></h3>
+            
             <ul class="device-list" id="list-other" aria-live="polite"></ul>
           </div>
+
+          <button id="add-device" class="primary-small add-wide" type="button">+ Add my device</button>
 
           <!-- Add a device -->
           <div class="pair" id="pair-panel" hidden>
@@ -272,10 +276,6 @@
           </div>
         </div>
 
-        <div class="actions">
-          <button id="camera-stop" class="secondary-button" type="button" disabled>Turn off camera</button>
-        </div>
-
         <p class="privacy-note">
           <span class="privacy-icon" aria-hidden="true">●</span>
           <span>Your camera is processed on this device. Nothing is recorded or uploaded.</span>
@@ -285,7 +285,7 @@
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.9.1</span>
+      <span>v0.9.2</span>
     </footer>
   </div>
 
