@@ -19,6 +19,7 @@
         <i aria-hidden="true"></i><span id="cam-state-text">Camera off</span>
       </span>
       <button id="guide-button" class="help-button" type="button" title="How it works" aria-label="How it works"><span aria-hidden="true">?</span><span class="help-text">How it works</span></button>
+      <button id="settings-button" class="help-button" type="button" title="Settings" aria-label="Settings"><span aria-hidden="true">⚙</span><span class="help-text">Settings</span></button>
       <button id="tab-button" class="top-button" type="button" title="Open GestureShare in a bigger window (a full tab)"><span aria-hidden="true">⤢</span> Open in tab</button>
       <button id="close-button" class="link-button" type="button">Close</button>
     </header>
@@ -261,32 +262,6 @@
           <ol class="log" id="log" aria-live="off"><li class="muted">Nothing yet.</li></ol>
         </section>
 
-        <details class="advanced">
-          <summary>Settings</summary>
-          <label class="setting"><input type="checkbox" id="sound-toggle" checked> Play a sound when a file arrives or is sent</label>
-          <label class="setting"><input type="checkbox" id="bg-toggle" checked> Receive files from My devices even when GestureShare is closed <span class="hint">Chrome itself must be running.</span></label>
-          <div class="setting">
-            <button id="calibrate-btn" class="secondary-button" type="button">Tune gestures to my hand</button>
-            <span class="hint">Takes 15 seconds. Helps if a fist, open palm or flick is hard to trigger.</span>
-          </div>
-          <div class="setting server-setting">
-            <label for="server-input">Connection server</label>
-            <div class="server-row">
-              <input id="server-input" type="text" placeholder="Free default server" autocomplete="off" spellcheck="false" aria-label="Connection server address">
-              <button id="server-save" class="secondary-button" type="button">Save</button>
-            </div>
-            <span class="hint" id="server-hint">Leave empty to use the free server. To use your own, paste its address, like https://pair.example.com</span>
-          </div>
-          <div class="setting server-setting">
-            <label for="phone-input">Phone page address</label>
-            <div class="server-row">
-              <input id="phone-input" type="text" placeholder="Not set" autocomplete="off" spellcheck="false" aria-label="Address of your phone page">
-              <button id="phone-save" class="secondary-button" type="button">Save</button>
-            </div>
-            <span class="hint">After you put the phone page online, paste its address here. The QR code then opens it on a phone, already filled in.</span>
-          </div>
-          <p id="debug-ratio">Show your hand to see live numbers.</p>
-        </details>
 
         <div id="permission-help" class="permission-help" role="alert" hidden>
           <h3>Camera access is needed</h3>
@@ -306,10 +281,55 @@
 
     <footer>
       <span>GestureShare</span>
-      <span>v0.9.4</span>
+      <span>v0.9.5</span>
     </footer>
   </div>
 
+
+  <!-- Settings: plain words, big switches -->
+  <div class="settings" id="settings" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="settings-card">
+      <div class="settings-head">
+        <h2 id="settings-title">Settings</h2>
+        <button class="primary-small" id="settings-done" type="button">Done</button>
+      </div>
+
+      <label class="s-row">
+        <span class="s-text"><b>Play a sound</b><small>A short sound when a file is sent or arrives.</small></span>
+        <input type="checkbox" id="sound-toggle" class="switch" checked>
+      </label>
+
+      <label class="s-row">
+        <span class="s-text"><b>Keep receiving after I close this</b><small>Files from My devices still arrive. Chrome must stay open.</small></span>
+        <input type="checkbox" id="bg-toggle" class="switch" checked>
+      </label>
+
+      <div class="s-row stack">
+        <span class="s-text"><b>Gestures not noticed?</b><small>Hold your hand in front of the camera for 15 seconds. We learn how you move. Use this if your fist, open palm or flick is hard to detect.</small></span>
+        <button id="calibrate-btn" class="secondary-button" type="button">Tune to my hand</button>
+      </div>
+
+      <details class="s-advanced">
+        <summary>Advanced <small>(most people never need this)</small></summary>
+        <div class="s-row stack">
+          <span class="s-text"><b>Connection server</b><small id="server-hint">Leave empty. GestureShare uses a free server to introduce your devices. Only fill this in if someone gave you their own server address.</small></span>
+          <div class="server-row">
+            <input id="server-input" type="text" placeholder="Free server (default)" autocomplete="off" spellcheck="false" aria-label="Connection server address">
+            <button id="server-save" class="secondary-button" type="button">Save</button>
+          </div>
+        </div>
+        <div class="s-row stack">
+          <span class="s-text"><b>Phone page address</b><small>Only for sending to a phone. After you put the phone page online, paste its address here. The QR code will then open it on the phone.</small></span>
+          <div class="server-row">
+            <input id="phone-input" type="text" placeholder="Not set" autocomplete="off" spellcheck="false" aria-label="Address of your phone page">
+            <button id="phone-save" class="secondary-button" type="button">Save</button>
+          </div>
+        </div>
+        <p id="debug-ratio">Show your hand to see live numbers.</p>
+      </details>
+      <p class="s-version">GestureShare v0.9.5 · Your camera is never recorded or uploaded.</p>
+    </div>
+  </div>
 
   <!-- First-time guide: plain words, one idea per page -->
   <div class="guide" id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-title">

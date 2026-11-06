@@ -2152,3 +2152,17 @@ phoneSave.addEventListener("click", () => {
   try { if (/^https:\/\/[^\s]+$/i.test(v)) localStorage.setItem(PHONE_KEY, v); else if (!v) localStorage.removeItem(PHONE_KEY); else { phoneInput.value = ""; phoneInput.placeholder = "Must start with https://"; return; } } catch {}
   phoneSave.textContent = "Saved ✓"; setTimeout(() => { phoneSave.textContent = "Save"; }, 1500);
 });
+
+
+// ---- Settings sheet ----
+(() => {
+  const sheet = document.getElementById("settings");
+  const open = () => { sheet.hidden = false; document.getElementById("settings-done").focus(); };
+  const close = () => { sheet.hidden = true; document.getElementById("settings-button").focus(); };
+  document.getElementById("settings-button").addEventListener("click", open);
+  document.getElementById("settings-done").addEventListener("click", close);
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet.hidden) close(); });
+  // Tuning needs the camera picture, so leave the sheet when it starts.
+  document.getElementById("calibrate-btn").addEventListener("click", () => { sheet.hidden = true; });
+})();
